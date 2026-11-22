@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=./config.schema.json
+# W1F3 configuration
+# Stored at ~/.config/fetch/config.yaml (on Windows: %USERPROFILE%\.config\fetch\config.yaml).
+
+# Fastfetch logo name. The first successful extraction is cached in ~/.config/fetch/logos/.
+logo: "Windows 11"
+logo_file: ""
+fastfetch_path: ""
+
+# Refresh live system information once per second.
+refresh: 1.0
+
+# 3D renderer
+speed: 0.45
+size: 1.0
+depth: 1.0
+spin: "xy"
+height: 32
+# Adaptive multiplier scales the logo with terminal dimensions, in addition to `size`.
+adaptive_scale: true
+adaptive_strength: 0.65
+adaptive_min: 1.0
+adaptive_max: 1.45
+mouse: true
+
+# Display
+color: true
+show_info: true
+box: false
+
+# These fields are shown in this order, matching the compact side-by-side layout.
+fields:
+  - os
+  - kernel
+  - uptime
+  - shell
+  - display
+  - terminal
+  - cpu
+  - gpu
+  - memory
+  - disk
+  - host
+  - packages
+  - bios
+  - board
+  - locale

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "config.schema.json",
+  "title": "W1F3 configuration",
+  "description": "Configuration schema for W1F3. The YAML config is parsed using this schema's supported properties.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "logo": {"type": "string", "default": "Windows 11", "description": "Fastfetch logo name to render."},
+    "logo_file": {"type": "string", "default": "", "description": "Optional custom ASCII/ANSI logo path, relative to config.yaml or absolute."},
+    "fastfetch_path": {"type": "string", "default": "", "description": "Optional path to fastfetch.exe. Empty uses PATH."},
+    "refresh": {"type": "number", "minimum": 0.2, "default": 1.0, "description": "System information refresh interval in seconds."},
+    "speed": {"type": "number", "minimum": 0, "default": 0.45, "description": "Automatic rotation speed."},
+    "size": {"type": "number", "minimum": 0.2, "default": 1.0, "description": "User-controlled base logo scale."},
+    "depth": {"type": "number", "minimum": 0.1, "default": 1.0, "description": "3D extrusion depth."},
+    "spin": {"type": "string", "enum": ["x", "y", "xy"], "default": "xy", "description": "Automatic rotation axes."},
+    "height": {"type": "integer", "minimum": 0, "default": 32, "description": "Legacy logo height cap when adaptive scaling is disabled."},
+    "adaptive_scale": {"type": "boolean", "default": true, "description": "Enable window-size-aware scaling."},
+    "adaptive_strength": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.65, "description": "Strength of the terminal-size scaling response."},
+    "adaptive_min": {"type": "number", "minimum": 1, "default": 1.0, "description": "Lower adaptive multiplier bound. Values below 1 are clamped to 1."},
+    "adaptive_max": {"type": "number", "minimum": 1, "default": 1.45, "description": "Upper adaptive multiplier bound."},
+    "mouse": {"type": "boolean", "default": true, "description": "Enable click-and-drag logo rotation."},
+    "color": {"type": "boolean", "default": true, "description": "Enable ANSI colors."},
+    "show_info": {"type": "boolean", "default": true, "description": "Show the system information panel."},
+    "box": {"type": "boolean", "default": false, "description": "Draw a border around the information panel."},
+    "fields": {"type": "array", "uniqueItems": true, "default": ["os", "kernel", "uptime", "shell", "display", "terminal", "cpu", "gpu", "memory", "disk", "host", "packages", "bios", "board", "locale"], "items": {"type": "string", "enum": ["os", "kernel", "uptime", "shell", "display", "terminal", "cpu", "gpu", "memory", "disk", "host", "packages", "bios", "board", "locale", "battery", "wifi", "localip", "publicip", "users", "de", "wm"]}, "description": "Information panel fields, in display order."}
+  }
+}

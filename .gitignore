@@ -1,0 +1,7 @@
+# Build artifacts
+*.exe
+*.test
+/build/
+
+# Runtime logo cache (never commit generated or personal logos)
+/logos/

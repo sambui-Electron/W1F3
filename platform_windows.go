@@ -41,6 +41,7 @@ var (
 	pGetLogicalDrives              = k32.NewProc("GetLogicalDrives")
 	pGetDriveTypeW                 = k32.NewProc("GetDriveTypeW")
 	pGetVolumeInformationW         = k32.NewProc("GetVolumeInformationW")
+	pGetDiskFreeSpaceExW           = k32.NewProc("GetDiskFreeSpaceExW")
 	pCreateToolhelp32Snapshot      = syscall.NewLazyDLL("kernel32.dll").NewProc("CreateToolhelp32Snapshot")
 	pProcess32FirstW               = syscall.NewLazyDLL("kernel32.dll").NewProc("Process32FirstW")
 	pProcess32NextW                = syscall.NewLazyDLL("kernel32.dll").NewProc("Process32NextW")
@@ -264,7 +265,18 @@ func readDisks() []string {
 		if ok != 0 {
 			label = strings.TrimSpace(syscall.UTF16ToString(volume))
 		}
-		items = append(items, formatVolume(root, label, ""))
+		var freeAvailable, totalBytes, totalFree uint64
+		spaceOK, _, _ := pGetDiskFreeSpaceExW.Call(
+			uintptr(unsafe.Pointer(root16)),
+			uintptr(unsafe.Pointer(&freeAvailable)),
+			uintptr(unsafe.Pointer(&totalBytes)),
+			uintptr(unsafe.Pointer(&totalFree)),
+		)
+		if spaceOK != 0 {
+			items = append(items, formatDiskUsage(root, label, totalBytes, totalFree))
+		} else {
+			items = append(items, formatDiskUsage(root, label, 0, 0))
+		}
 	}
 	return items
 }

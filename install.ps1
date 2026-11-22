@@ -6,7 +6,7 @@ $target = Join-Path $env:LOCALAPPDATA 'Programs\Fetch'
 $configDir = Join-Path $HOME '.config\fetch'
 $logoDir = Join-Path $configDir 'logos'
 
-$required = @('w1f3.exe', 'w1f3.cmd', 'fetch.cmd')
+$required = @('w1f3.exe', 'w1f3.cmd', 'fetch.cmd', 'config.schema.json')
 foreach ($name in $required) {
     if (-not (Test-Path (Join-Path $source $name))) {
         throw "$name is missing from $source. Extract the complete W1F3 release ZIP before installing."
@@ -27,11 +27,27 @@ if (Test-Path (Join-Path $source 'README.md')) {
     if (Test-Path $old) { Remove-Item $old -Force }
 }
 
-# Preserve user config and logos. Install schema only when not already present.
+# Preserve user settings, but always refresh the editor schema to match this release.
 $schemaSource = Join-Path $source 'config.schema.json'
 $schemaTarget = Join-Path $configDir 'config.schema.json'
-if ((Test-Path $schemaSource) -and -not (Test-Path $schemaTarget)) {
-    Copy-Item $schemaSource $schemaTarget
+Copy-Item $schemaSource $schemaTarget -Force
+
+# Add or refresh the YAML Language Server schema reference without changing any
+# actual user settings. This also repairs configs created by older releases.
+$configFile = Join-Path $configDir 'config.yaml'
+$schemaDirective = '# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json'
+if (Test-Path $configFile) {
+    $configText = [System.IO.File]::ReadAllText($configFile)
+    $configText = $configText.TrimStart([char]0xFEFF)
+    $directivePattern = '(?m)^[ \t]*#[ \t]*yaml-language-server:[ \t]*\$schema=.*$'
+    if ([System.Text.RegularExpressions.Regex]::IsMatch($configText, $directivePattern)) {
+        $configText = [System.Text.RegularExpressions.Regex]::Replace($configText, $directivePattern, $schemaDirective)
+    }
+    else {
+        $configText = $schemaDirective + "`r`n" + $configText
+    }
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($configFile, $configText, $utf8NoBom)
 }
 
 # Keep the existing install directory on PATH for upgrade compatibility.
@@ -47,14 +63,15 @@ $pathEntries = @($target) + $pathEntries
 [Environment]::SetEnvironmentVariable('Path', ($pathEntries -join ';'), 'User')
 
 Write-Host ''
-Write-Host 'W1F3 v0.5.1 installed/upgraded successfully.' -ForegroundColor Green
+Write-Host 'W1F3 v0.5.2 installed/upgraded successfully.' -ForegroundColor Green
 Write-Host "Executable:    $(Join-Path $target 'w1f3.exe')"
 Write-Host "Primary command: W1F3"
 Write-Host "Legacy alias:   fetch"
 Write-Host "Configuration:  $(Join-Path $configDir 'config.yaml')"
 Write-Host "Logo cache:     $logoDir"
 Write-Host "Config schema:  $schemaTarget"
-Write-Host 'Existing configuration and logo cache were preserved.'
+Write-Host 'Existing configuration settings and logo cache were preserved.'
+Write-Host 'The YAML schema reference was added or refreshed without changing your settings.'
 Write-Host 'Open a new terminal, then run: W1F3 -v'
 
 $resolved = Get-Command W1F3 -All -ErrorAction SilentlyContinue

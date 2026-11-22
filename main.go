@@ -13,13 +13,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
 )
 
-const version = "0.5.1"
+const version = "0.5.2"
 const defaultConfigURL = "https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.yaml"
 
 var downloadDefaultConfig = func() ([]byte, error) {
@@ -77,10 +78,59 @@ type Config struct {
 	Fields           []string
 }
 
+// supportedInfoFields mirrors the current Fastfetch information modules W1F3
+// exposes, plus the Windows-native fields rendered by W1F3 itself. W1F3-owned
+// presentation modules (logo, title, separator, break) and option-driven modules
+// (command, custom) are excluded because W1F3 owns its layout and does not expose
+// Fastfetch's per-module configuration language.
+var supportedInfoFields = []string{
+	"battery", "bios", "bluetooth", "bluetoothradio", "board", "bootmgr",
+	"brightness", "btrfs", "camera", "chassis", "codec", "cpu", "cpucache", "cpuusage",
+	"colors", "cursor", "datetime", "display", "disk", "diskio", "de", "dns",
+	"editor", "font", "gamepad", "gpu", "host", "icons", "initsystem",
+	"keyboard", "kernel", "lm", "loadavg", "locale", "localip", "media",
+	"memory", "monitor", "mouse", "netio", "opencl", "opengl", "os", "packages",
+	"physicaldisk", "physicalmemory", "player", "poweradapter", "processes",
+	"publicip", "shell", "sound", "swap", "terminal", "terminalfont", "top",
+	"terminalsize", "terminaltheme", "theme", "tpm", "uptime", "users", "version",
+	"vulkan", "wallpaper", "weather", "wm", "wifi", "wmtheme", "zpool",
+}
+
+var nativeInfoFields = map[string]bool{
+	"disk": true, "kernel": true, "shell": true, "uptime": true,
+}
+
+func isSupportedInfoField(field string) bool {
+	field = strings.ToLower(strings.TrimSpace(field))
+	for _, supported := range supportedInfoFields {
+		if field == supported {
+			return true
+		}
+	}
+	return false
+}
+
+// fastfetchFieldsForConfig returns only modules that should be queried from
+// Fastfetch. Disk, kernel, shell and uptime are collected by W1F3's native
+// Windows code and therefore do not belong in the Fastfetch structure request.
+func fastfetchFieldsForConfig(fields []string) []string {
+	result := make([]string, 0, len(fields))
+	seen := make(map[string]bool, len(fields))
+	for _, field := range fields {
+		field = strings.ToLower(strings.TrimSpace(field))
+		if !isSupportedInfoField(field) || nativeInfoFields[field] || seen[field] {
+			continue
+		}
+		seen[field] = true
+		result = append(result, field)
+	}
+	return result
+}
+
 func defaultConfig() Config {
 	return Config{
 		Logo: "Windows 11", Refresh: 1.0, Speed: 0.45, Size: 1.0,
-		Depth: 1.0, Spin: "xy", Height: 32, AdaptiveScale: true, AdaptiveStrength: 0.65, AdaptiveMin: 1.0, AdaptiveMax: 1.45, Mouse: true,
+		Depth: 1.0, Spin: "xy", Height: 32, AdaptiveScale: true, AdaptiveStrength: 0.65, AdaptiveMin: 1.0, AdaptiveMax: 1.5, Mouse: true,
 		Color: true, ShowInfo: true, Box: false,
 		Fields: []string{"os", "kernel", "uptime", "shell", "display", "terminal", "cpu", "gpu", "memory", "disk", "host", "packages", "bios", "board", "locale"},
 	}
@@ -197,6 +247,17 @@ func parseYAMLConfig(data []byte, base Config) (Config, error) {
 	if err := scanner.Err(); err != nil {
 		return cfg, err
 	}
+	seenFields := make(map[string]bool, len(cfg.Fields))
+	for _, field := range cfg.Fields {
+		field = strings.ToLower(strings.TrimSpace(field))
+		if !isSupportedInfoField(field) {
+			return cfg, fmt.Errorf("unsupported information field %q; see config.schema.json for available fields", field)
+		}
+		if seenFields[field] {
+			return cfg, fmt.Errorf("duplicate information field %q", field)
+		}
+		seenFields[field] = true
+	}
 	if len(cfg.Fields) == 0 {
 		cfg.Fields = []string{}
 	}
@@ -223,6 +284,9 @@ func parseYAMLConfig(data []byte, base Config) (Config, error) {
 	}
 	if cfg.AdaptiveMax < cfg.AdaptiveMin {
 		cfg.AdaptiveMax = cfg.AdaptiveMin
+	}
+	if cfg.AdaptiveMax > 1.5 {
+		cfg.AdaptiveMax = 1.5
 	}
 	return cfg, nil
 }
@@ -383,8 +447,12 @@ func decodeFastfetchJSON(raw []byte) (map[string]any, error) {
 	return result, nil
 }
 
-func fetchModules(exe string) (map[string]any, error) {
-	out, err := runFastfetch(exe, "-c", "none", "-s", "os:display:terminal:cpu:gpu:memory:locale:host:packages:bios:board", "--format", "json")
+func fetchModules(exe string, fields []string) (map[string]any, error) {
+	requested := fastfetchFieldsForConfig(fields)
+	if len(requested) == 0 {
+		return map[string]any{}, nil
+	}
+	out, err := runFastfetch(exe, "-c", "none", "-s", strings.Join(requested, ":"), "--format", "json")
 	if err != nil {
 		return nil, err
 	}
@@ -488,9 +556,34 @@ func formatVolume(drive, label, fallback string) string {
 	_ = fallback
 	name := strings.TrimSpace(label)
 	if name == "" {
-		return drive
+		name = "Local Disk"
 	}
-	return drive + name
+	letter := strings.TrimSuffix(strings.TrimRight(drive, `\/`), ":")
+	return letter + " (" + name + ")"
+}
+
+func formatDiskUsage(drive, label string, totalBytes, freeBytes uint64) string {
+	name := strings.TrimSpace(label)
+	if name == "" {
+		name = "Local Disk"
+	}
+	used := uint64(0)
+	if totalBytes > freeBytes {
+		used = totalBytes - freeBytes
+	}
+	const gib = float64(1024 * 1024 * 1024)
+	usedGB := float64(used) / gib
+	totalGB := float64(totalBytes) / gib
+	percent := 0.0
+	if totalBytes > 0 {
+		percent = float64(used) * 100 / float64(totalBytes)
+	}
+	letter := strings.TrimSuffix(strings.TrimRight(drive, `\/`), ":")
+	return fmt.Sprintf("%s (%s): %s GB/%s GB (%.0f%%)", letter, name, compactNumber(usedGB), compactNumber(totalGB), percent)
+}
+
+func compactNumber(value float64) string {
+	return strconv.FormatFloat(value, 'f', 1, 64)
 }
 
 func fmtUptime(seconds uint64) string {
@@ -607,14 +700,45 @@ func fmtTerminal(v any) string {
 func generic(v any) string {
 	switch x := v.(type) {
 	case map[string]any:
-		for _, k := range []string{"prettyName", "name", "model", "gpu", "description", "value", "version", "release"} {
-			if a, ok := x[k]; ok && a != nil && a != "" {
-				if s := str(a); s != "" {
-					return s
+		// Prefer human-readable identity/status properties, then fall back to
+		// scalar fields so less common Fastfetch modules are still displayable.
+		preferred := []string{
+			"prettyName", "name", "model", "product", "vendor", "manufacturer",
+			"cpu", "gpu", "description", "ssid", "ip", "address", "percent",
+			"percentage", "capacity", "status", "state", "value", "version",
+			"release", "temperature", "frequency", "used", "total", "available", "size",
+		}
+		parts := make([]string, 0, 4)
+		used := make(map[string]bool, 4)
+		for _, key := range preferred {
+			if a, ok := x[key]; ok && a != nil && a != "" {
+				if value := str(a); value != "" && !used[value] {
+					parts = append(parts, value)
+					used[value] = true
+					if len(parts) == 4 {
+						break
+					}
 				}
 			}
 		}
-		return ""
+		if len(parts) == 0 {
+			keys := make([]string, 0, len(x))
+			for key := range x {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				value := str(x[key])
+				if value == "" || strings.HasPrefix(value, "map[") || strings.HasPrefix(value, "[") {
+					continue
+				}
+				parts = append(parts, titleCase(key)+": "+value)
+				if len(parts) == 4 {
+					break
+				}
+			}
+		}
+		return strings.Join(parts, " · ")
 	case []any:
 		items := []string{}
 		for _, a := range x {
@@ -1007,26 +1131,23 @@ func buildInfo(mods map[string]any, fields []string, native NativeInfo) []InfoLi
 }
 
 func titleCase(s string) string {
-	if s == "os" {
-		return "OS"
+	labels := map[string]string{
+		"os": "OS", "gpu": "GPU", "cpu": "CPU", "ip": "IP", "wm": "WM", "de": "DE",
+		"localip": "Local IP", "publicip": "Public IP", "bluetoothradio": "Bluetooth Radio",
+		"bootmgr": "Boot Manager", "cpucache": "CPU Cache", "cpuusage": "CPU Usage",
+		"diskio": "Disk I/O", "initsystem": "Init System", "loadavg": "Load Average",
+		"netio": "Network I/O", "opencl": "OpenCL", "opengl": "OpenGL",
+		"physicaldisk": "Physical Disk", "physicalmemory": "Physical Memory",
+		"poweradapter": "Power Adapter", "terminalfont": "Terminal Font",
+		"terminalsize": "Terminal Size", "terminaltheme": "Terminal Theme", "codec": "Video Codecs",
+		"top":     "Top Processes",
+		"wmtheme": "WM Theme", "wifi": "Wi-Fi", "tpm": "TPM",
 	}
-	if s == "gpu" {
-		return "GPU"
+	if label, ok := labels[s]; ok {
+		return label
 	}
-	if s == "cpu" {
-		return "CPU"
-	}
-	if s == "ip" {
-		return "IP"
-	}
-	if s == "wm" {
-		return "WM"
-	}
-	if s == "de" {
-		return "DE"
-	}
-	if s == "localip" {
-		return "Local IP"
+	if s == "" {
+		return ""
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
 }
@@ -1056,6 +1177,20 @@ func computeLayout(cols, rows int, showInfo bool) Layout {
 	}
 }
 
+// centeredContentRect positions a rendered content canvas inside its layout
+// viewport. Recompute it for every frame so terminal resizes and fixed-height
+// logo canvases stay aligned with the information panel.
+func centeredContentRect(viewport Rect, contentW, contentH int) Rect {
+	visibleW := minInt(maxInt(0, contentW), viewport.W)
+	visibleH := minInt(maxInt(0, contentH), viewport.H)
+	return Rect{
+		X: viewport.X + maxInt(0, (viewport.W-visibleW)/2),
+		Y: viewport.Y + maxInt(0, (viewport.H-visibleH)/2),
+		W: visibleW,
+		H: visibleH,
+	}
+}
+
 func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows int, cfg Config) (string, Rect) {
 	if cols < 32 {
 		cols = 32
@@ -1071,15 +1206,20 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 		}
 	}
 	layout := computeLayout(cols, rows, cfg.ShowInfo)
-	for y, row := range logo {
-		yy := layout.Logo.Y + y
-		if yy < 0 || yy >= rows {
-			continue
-		}
-		for x, px := range row {
-			xx := layout.Logo.X + x
-			if xx >= layout.Logo.X && xx < layout.Logo.X+layout.Logo.W && xx < cols {
-				canvas[yy][xx] = px
+	logoBounds := layout.Logo
+	if len(logo) > 0 {
+		logoWidth := len(logo[0])
+		logoBounds = centeredContentRect(layout.Logo, logoWidth, len(logo))
+		for y, row := range logo {
+			yy := logoBounds.Y + y
+			if yy < layout.Logo.Y || yy >= layout.Logo.Y+layout.Logo.H || yy < 0 || yy >= rows {
+				continue
+			}
+			for x, px := range row {
+				xx := logoBounds.X + x
+				if xx >= layout.Logo.X && xx < layout.Logo.X+layout.Logo.W && xx >= 0 && xx < cols {
+					canvas[yy][xx] = px
+				}
 			}
 		}
 	}
@@ -1126,13 +1266,13 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 				break
 			}
 			if len(line.Lines) > 0 {
-				put(canvas, contentX, y, clip(line.Label, infoW), cCyan, infoW)
+				put(canvas, contentX, y, clip(line.Label+":", infoW), cCyan, infoW)
 				y++
 				for _, item := range line.Lines {
 					if y >= rows {
 						break
 					}
-					put(canvas, contentX+1, y, clip("- "+item, infoW-1), cWhite, infoW-1)
+					put(canvas, contentX+4, y, clip(item, infoW-4), cWhite, infoW-4)
 					y++
 				}
 				continue
@@ -1166,16 +1306,32 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 	return b.String(), layout.Logo
 }
 
+// adaptiveScalingEnabled reports whether the adaptive multiplier and
+// responsive viewport-height behavior should be active.
+func adaptiveScalingEnabled(cfg Config) bool {
+	return cfg.AdaptiveScale && cfg.Size <= 1.5
+}
+
+func effectiveLogoViewportHeight(available int, cfg Config) int {
+	if !adaptiveScalingEnabled(cfg) && cfg.Height > 0 && cfg.Height < available {
+		return cfg.Height
+	}
+	return available
+}
+
 func adaptiveScale(cols, rows int, cfg Config) float64 {
-	if !cfg.AdaptiveScale {
+	if !adaptiveScalingEnabled(cfg) {
 		return 1
 	}
-	// Baseline is a medium terminal (120 columns x 36 rows).
-	widthFactor := float64(cols) / 120
-	heightFactor := float64(rows) / 36
-	base := math.Min(widthFactor, heightFactor)
-	multiplier := 1 + (base-1)*cfg.AdaptiveStrength
-	return math.Max(1.0, math.Min(cfg.AdaptiveMax, multiplier))
+	// A medium terminal (120x36) is the neutral baseline. Use the geometric
+	// mean so extra width still contributes when the terminal is unusually wide,
+	// while height continues to constrain the available rendering area.
+	widthFactor := math.Max(1.0, float64(cols)/120.0)
+	heightFactor := math.Max(1.0, float64(rows)/36.0)
+	windowFactor := math.Sqrt(widthFactor * heightFactor)
+	multiplier := 1.0 + (windowFactor-1.0)*math.Max(0, cfg.AdaptiveStrength)
+	maxScale := math.Min(1.5, math.Max(1.0, cfg.AdaptiveMax))
+	return math.Max(1.0, math.Min(maxScale, multiplier))
 }
 
 func main() {
@@ -1243,7 +1399,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	mods, err := fetchModules(ff)
+	mods, err := fetchModules(ff, cfg.Fields)
 	if err != nil {
 		fatal(err)
 	}
@@ -1272,7 +1428,7 @@ func main() {
 	for {
 		now := time.Now()
 		if lastRefresh.IsZero() || now.Sub(lastRefresh) >= time.Duration(cfg.Refresh*float64(time.Second)) {
-			if fresh, e := fetchModules(ff); e == nil {
+			if fresh, e := fetchModules(ff, cfg.Fields); e == nil {
 				mods = fresh
 			}
 			if lastRefresh.IsZero() {
@@ -1291,10 +1447,7 @@ func main() {
 		}
 		layout := computeLayout(cols, rows, cfg.ShowInfo)
 		viewportW := maxInt(8, layout.Logo.W)
-		viewportH := maxInt(6, layout.Logo.H)
-		if !cfg.AdaptiveScale && cfg.Height > 0 && cfg.Height < viewportH {
-			viewportH = cfg.Height
-		}
+		viewportH := effectiveLogoViewportHeight(maxInt(6, layout.Logo.H), cfg)
 		angleX, angleY := ax, ay
 		if cfg.Spin == "x" {
 			angleY = 0

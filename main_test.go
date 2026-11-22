@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -83,11 +85,23 @@ func TestCompactSideBySideInfoLayout(t *testing.T) {
 }
 
 func TestDiskLabelsRemainReadable(t *testing.T) {
-	if got := formatVolume(`C:\`, "Windows", "Local Disk"); got != `C:\Windows` {
+	if got := formatVolume(`C:\`, "Windows", "Local Disk"); got != `C (Windows)` {
 		t.Fatalf("got %q", got)
 	}
-	if got := formatVolume(`D:\`, "", "Local Disk"); got != `D:\` {
+	if got := formatVolume(`D:\`, "", "Local Disk"); got != `D (Local Disk)` {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestDiskUsageFormatting(t *testing.T) {
+	gib := uint64(1024 * 1024 * 1024)
+	got := formatDiskUsage(`C:\`, "Windows", 100*gib, 25*gib)
+	want := "C (Windows): 75.0 GB/100.0 GB (75%)"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	if got := formatDiskUsage(`D:\`, "Example", 0, 0); got != "D (Example): 0.0 GB/0.0 GB (0%)" {
+		t.Fatalf("zero-capacity formatting got %q", got)
 	}
 }
 
@@ -153,6 +167,46 @@ func TestResponsiveLayoutKeepsLogoAndPanelTogether(t *testing.T) {
 	}
 }
 
+func TestAdaptiveScalingEffectiveEnablement(t *testing.T) {
+	cfg := defaultConfig()
+	if !adaptiveScalingEnabled(cfg) {
+		t.Fatal("adaptive scaling should be enabled for the default config")
+	}
+	cfg.Size = 1.5
+	if !adaptiveScalingEnabled(cfg) {
+		t.Fatal("base size 1.5 should not disable adaptive scaling")
+	}
+	cfg.Size = 1.5001
+	if adaptiveScalingEnabled(cfg) {
+		t.Fatal("base size greater than 1.5 should disable all adaptive scaling")
+	}
+	cfg.Size = 1.0
+	cfg.AdaptiveScale = false
+	if adaptiveScalingEnabled(cfg) {
+		t.Fatal("adaptive_scale: false should disable adaptive scaling")
+	}
+}
+
+func TestLargeBaseSizeUsesFixedLogoViewportHeight(t *testing.T) {
+	cfg := defaultConfig()
+	if got := effectiveLogoViewportHeight(64, cfg); got != 64 {
+		t.Fatalf("adaptive mode should use the available viewport height, got %d", got)
+	}
+	cfg.Size = 1.5
+	if got := effectiveLogoViewportHeight(64, cfg); got != 64 {
+		t.Fatalf("base size 1.5 should keep adaptive viewport sizing, got %d", got)
+	}
+	cfg.Size = 1.6
+	if got := effectiveLogoViewportHeight(64, cfg); got != cfg.Height {
+		t.Fatalf("base size above 1.5 should use fixed height %d, got %d", cfg.Height, got)
+	}
+	cfg.Size = 1.0
+	cfg.AdaptiveScale = false
+	if got := effectiveLogoViewportHeight(64, cfg); got != cfg.Height {
+		t.Fatalf("adaptive_scale: false should use fixed height %d, got %d", cfg.Height, got)
+	}
+}
+
 func TestAdaptiveScaleIsIndependentOfUserScale(t *testing.T) {
 	cfg := defaultConfig()
 	small := adaptiveScale(80, 24, cfg)
@@ -166,12 +220,35 @@ func TestAdaptiveScaleIsIndependentOfUserScale(t *testing.T) {
 	}
 }
 
+func TestAdaptiveScaleRespondsToWideWindows(t *testing.T) {
+	cfg := defaultConfig()
+	wide := adaptiveScale(240, 36, cfg)
+	if wide <= 1.0 || wide > 1.5 {
+		t.Fatalf("wide terminal should increase scale within cap, got %.2f", wide)
+	}
+	if got := adaptiveScale(120, 36, cfg); got != 1.0 {
+		t.Fatalf("baseline terminal should remain at 1.0, got %.2f", got)
+	}
+}
+
 func TestAdaptiveScaleNeverShrinksBelowOne(t *testing.T) {
 	cfg := defaultConfig()
 	for _, dims := range [][2]int{{40, 12}, {80, 24}, {120, 36}, {238, 67}} {
 		if got := adaptiveScale(dims[0], dims[1], cfg); got < 1.0 {
 			t.Fatalf("adaptive multiplier must not shrink: %v => %.2f", dims, got)
 		}
+	}
+}
+
+func TestAdaptiveScaleCapsAtOnePointFiveAndRespectsLargeUserScale(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.AdaptiveMax = 9
+	if got := adaptiveScale(1000, 300, cfg); got > 1.5 {
+		t.Fatalf("adaptive scale exceeded 1.5: %.2f", got)
+	}
+	cfg.Size = 1.6
+	if got := adaptiveScale(1000, 300, cfg); got != 1.0 {
+		t.Fatalf("adaptive scale should be disabled for user size > 1.5, got %.2f", got)
 	}
 }
 
@@ -183,20 +260,40 @@ func TestDiskInfoUsesMultilineList(t *testing.T) {
 }
 
 func TestVersionFlagIsDocumented(t *testing.T) {
-	if !strings.Contains(version, "0.5.1") {
+	if !strings.Contains(version, "0.5.2") {
 		t.Fatalf("unexpected W1F3 version: %s", version)
 	}
 }
 
 func TestDiskListRendersOnSeparateBulletRows(t *testing.T) {
 	cfg := defaultConfig()
-	info := []InfoLine{{Label: "Disk", Lines: []string{`C:\Windows`, `D:\example`, `E:\example2`}}}
+	info := []InfoLine{{Label: "Disk", Lines: []string{"C (Windows): 75.0 GB/100.0 GB (75%)", "D (Example): 20.0 GB/50.0 GB (40%)"}}}
 	logo := [][]Pixel{{{'#', cCyan, 0}}}
 	frame, _ := composeFrame(logo, info, "SAM@PC", 100, 28, cfg)
-	for _, expected := range []string{"Disk", "- C:\\Windows", "- D:\\example", "- E:\\example2"} {
+	for _, expected := range []string{"Disk:", "C (Windows):", "D (Example):"} {
 		if !strings.Contains(frame, expected) {
 			t.Fatalf("frame missing %q", expected)
 		}
+	}
+}
+
+func TestDiskRowsUseTabWidthIndent(t *testing.T) {
+	cfg := defaultConfig()
+	info := []InfoLine{{Label: "Disk", Lines: []string{"C (Windows): 75 GB/100 GB (75%)"}}}
+	logo := [][]Pixel{{{'#', cCyan, 0}}}
+	frame, _ := composeFrame(logo, info, "SAM@PC", 100, 28, cfg)
+	lines := strings.Split(frame, "\r\n")
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, "C (Windows):") {
+			if !strings.Contains(line, "    \x1b[38;5;252mC (Windows):") {
+				t.Fatalf("disk row should use four-column indentation, got %q", line)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("disk row not rendered")
 	}
 }
 
@@ -219,5 +316,189 @@ func TestLegacyDefaultFieldsGainNewInfoWithoutConfigRewrite(t *testing.T) {
 	cfg.Fields = []string{"os", "kernel", "uptime", "shell", "display", "terminal", "cpu", "gpu", "memory", "disk", "host", "packages", "bios", "board", "locale"}
 	if !equalStrings(cfg.Fields, defaultConfig().Fields) {
 		t.Fatal("new stock list mismatch")
+	}
+}
+
+func stripANSIForTest(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) && !(s[i] >= 0x40 && s[i] <= 0x7e) {
+				i++
+			}
+			if i < len(s) {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+func TestComposeFrameCentersFixedHeightLogoCanvas(t *testing.T) {
+	cfg := defaultConfig()
+	logo := make([][]Pixel, 32)
+	for y := range logo {
+		logo[y] = make([]Pixel, 40)
+		for x := range logo[y] {
+			logo[y][x] = Pixel{'#', cCyan, 0}
+		}
+	}
+
+	for _, dims := range [][2]int{{120, 40}, {120, 60}, {160, 60}} {
+		cols, rows := dims[0], dims[1]
+		frame, hitBounds := composeFrame(logo, nil, "", cols, rows, cfg)
+		viewport := computeLayout(cols, rows, cfg.ShowInfo).Logo
+		if hitBounds != viewport {
+			t.Fatalf("mouse hit area should remain the full logo viewport at %dx%d: got %#v want %#v", cols, rows, hitBounds, viewport)
+		}
+		placed := centeredContentRect(viewport, len(logo[0]), len(logo))
+		lines := strings.Split(stripANSIForTest(frame), "\r\n")
+		firstY, firstX := -1, -1
+		for y, line := range lines {
+			if x := strings.IndexByte(line, '#'); x >= 0 {
+				firstY, firstX = y, x
+				break
+			}
+		}
+		if firstY != placed.Y || firstX != placed.X {
+			t.Fatalf("logo top-left at %dx%d = (%d,%d), want (%d,%d); viewport=%#v", cols, rows, firstX, firstY, placed.X, placed.Y, viewport)
+		}
+	}
+}
+
+func TestCenteredContentRectTracksViewportEveryFrame(t *testing.T) {
+	contentW, contentH := 36, 24
+	first := Rect{X: 10, Y: 1, W: 50, H: 38}
+	second := Rect{X: 15, Y: 1, W: 70, H: 58}
+	firstBounds := centeredContentRect(first, contentW, contentH)
+	secondBounds := centeredContentRect(second, contentW, contentH)
+	if firstBounds == secondBounds {
+		t.Fatal("logo bounds should be recomputed when the terminal viewport changes")
+	}
+	if firstBounds.X != first.X+(first.W-contentW)/2 || firstBounds.Y != first.Y+(first.H-contentH)/2 {
+		t.Fatalf("first viewport alignment incorrect: %#v", firstBounds)
+	}
+	if secondBounds.X != second.X+(second.W-contentW)/2 || secondBounds.Y != second.Y+(second.H-contentH)/2 {
+		t.Fatalf("second viewport alignment incorrect: %#v", secondBounds)
+	}
+}
+
+func TestFastfetchQueryUsesOnlySelectedNonNativeFields(t *testing.T) {
+	got := fastfetchFieldsForConfig([]string{
+		"os", "kernel", "uptime", "shell", "disk", "battery", "wifi", "cpu", "battery",
+	})
+	want := []string{"os", "battery", "wifi", "cpu"}
+	if !equalStrings(got, want) {
+		t.Fatalf("Fastfetch fields = %#v, want %#v", got, want)
+	}
+	if got := fastfetchFieldsForConfig([]string{"disk", "kernel", "uptime", "shell"}); len(got) != 0 {
+		t.Fatalf("native-only fields must not be queried from Fastfetch: %#v", got)
+	}
+}
+
+func TestConfigRejectsUnknownAndDuplicateFields(t *testing.T) {
+	if _, err := parseYAMLConfig([]byte("fields:\n  - os\n  - not_a_module\n"), defaultConfig()); err == nil {
+		t.Fatal("unknown information field should be rejected")
+	}
+	if _, err := parseYAMLConfig([]byte("fields:\n  - os\n  - os\n"), defaultConfig()); err == nil {
+		t.Fatal("duplicate information field should be rejected")
+	}
+}
+
+func TestDefaultConfigAndSchemaExposeEverySupportedField(t *testing.T) {
+	configBytes, err := os.ReadFile("config.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(configBytes), "# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json\n") {
+		t.Fatal("config.yaml must link to the published JSON schema on its first line")
+	}
+	cfg, err := parseYAMLConfig(configBytes, defaultConfig())
+	if err != nil {
+		t.Fatalf("stock config is invalid: %v", err)
+	}
+	if !equalStrings(cfg.Fields, defaultConfig().Fields) {
+		t.Fatalf("stock config fields differ from runtime defaults: %#v", cfg.Fields)
+	}
+	// Check the actual YAML list entries, including commented options. This
+	// avoids false positives such as matching "cpu" inside "cpuusage".
+	configCatalog := make(map[string]bool)
+	for _, line := range strings.Split(string(configBytes), "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "#")
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "- ") {
+			continue
+		}
+		field := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(line, "- "), "#", 2)[0])
+		if field == "" {
+			continue
+		}
+		if configCatalog[field] {
+			t.Errorf("field %q appears more than once in config.yaml", field)
+		}
+		configCatalog[field] = true
+	}
+	if len(configCatalog) != len(supportedInfoFields) {
+		t.Errorf("config.yaml catalog has %d fields, runtime supports %d", len(configCatalog), len(supportedInfoFields))
+	}
+	for _, field := range supportedInfoFields {
+		if !configCatalog[field] {
+			t.Errorf("default config should list %q as an active or commented selection", field)
+		}
+	}
+	for field := range configCatalog {
+		if !isSupportedInfoField(field) {
+			t.Errorf("config.yaml lists unsupported field %q", field)
+		}
+	}
+
+	var schema struct {
+		ID         string `json:"$id"`
+		Properties map[string]struct {
+			Items struct {
+				Enum []string `json:"enum"`
+			} `json:"items"`
+		} `json:"properties"`
+	}
+	schemaBytes, err := os.ReadFile("config.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(schemaBytes, &schema); err != nil {
+		t.Fatalf("invalid JSON schema: %v", err)
+	}
+	const schemaURL = "https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json"
+	if schema.ID != schemaURL {
+		t.Fatalf("schema $id = %q, want %q", schema.ID, schemaURL)
+	}
+	fieldSchema, ok := schema.Properties["fields"]
+	if !ok {
+		t.Fatal("schema is missing properties.fields")
+	}
+	if len(fieldSchema.Items.Enum) != len(supportedInfoFields) {
+		t.Fatalf("schema has %d fields, runtime supports %d", len(fieldSchema.Items.Enum), len(supportedInfoFields))
+	}
+	schemaFields := append([]string(nil), fieldSchema.Items.Enum...)
+	runtimeFields := append([]string(nil), supportedInfoFields...)
+	sort.Strings(schemaFields)
+	sort.Strings(runtimeFields)
+	if !equalStrings(schemaFields, runtimeFields) {
+		t.Fatalf("schema field enum does not match runtime catalog:\nschema:  %#v\nruntime: %#v", schemaFields, runtimeFields)
+	}
+}
+
+func TestGenericFormatterHandlesAdditionalFastfetchShapes(t *testing.T) {
+	got := generic(map[string]any{"capacity": float64(82), "status": "Charging", "modelName": "Example Battery"})
+	if got == "" {
+		t.Fatal("generic formatter should emit useful output for module data outside the original field set")
+	}
+	fallback := generic(map[string]any{"driverInfo": "Adapter Driver", "firmwareRevision": "1.2.3"})
+	if fallback == "" || !strings.Contains(fallback, "Adapter Driver") {
+		t.Fatalf("generic map fallback lost scalar information: %q", fallback)
 	}
 }

@@ -1,8 +1,9 @@
-# yaml-language-server: $schema=./config.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json
 # W1F3 configuration
-# Stored at ~/.config/fetch/config.yaml (on Windows: %USERPROFILE%\.config\fetch\config.yaml).
+# Stored at %USERPROFILE%\.config\fetch\config.yaml.
+# The schema URL above enables YAML editor validation and completion.
 
-# Fastfetch logo name. The first successful extraction is cached in ~/.config/fetch/logos/.
+# Fastfetch logo name. The first successful extraction is cached in the logos/ folder.
 logo: "Windows 11"
 logo_file: ""
 fastfetch_path: ""
@@ -17,10 +18,12 @@ depth: 1.0
 spin: "xy"
 height: 32
 # Adaptive multiplier scales the logo with terminal dimensions, in addition to `size`.
+# It never shrinks below 1.0x and is capped at 1.5x.
+# If `size` is greater than 1.5, adaptive scaling is disabled.
 adaptive_scale: true
 adaptive_strength: 0.65
 adaptive_min: 1.0
-adaptive_max: 1.45
+adaptive_max: 1.5
 mouse: true
 
 # Display
@@ -28,20 +31,85 @@ color: true
 show_info: true
 box: false
 
-# These fields are shown in this order, matching the compact side-by-side layout.
+# Information fields are displayed in this order.
+# The active entries below are the default compact layout.
+# Uncomment optional entries to display them, or remove/comment entries to hide them.
+# Every field below is selectable and validated by config.schema.json.
 fields:
-  - os
-  - kernel
-  - uptime
-  - shell
-  - display
-  - terminal
-  - cpu
-  - gpu
-  - memory
-  - disk
-  - host
-  - packages
-  - bios
-  - board
-  - locale
+  # Default fields
+  - os  # Operating system
+  - kernel  # Kernel (W1F3 Windows-native)
+  - uptime  # Uptime (W1F3 Windows-native)
+  - shell  # Shell (W1F3 Windows-native)
+  - display  # Display
+  - terminal  # Terminal
+  - cpu  # CPU
+  - gpu  # GPU
+  - memory  # Memory
+  - disk  # Disk (W1F3 Windows-native, named volumes)
+  - host  # Host
+  - packages  # Packages
+  - bios  # BIOS
+  - board  # Motherboard
+  - locale  # Locale
+
+  # Hardware and devices (optional)
+  # - battery  # Battery level and state
+  # - bluetooth  # Bluetooth devices
+  # - bluetoothradio  # Bluetooth radio
+  # - brightness  # Display brightness
+  # - camera  # Camera devices
+  # - codec  # Hardware video codec support
+  # - chassis  # Chassis
+  # - gamepad  # Game controllers
+  # - keyboard  # Keyboard devices
+  # - monitor  # Monitor information
+  # - mouse  # Mouse devices
+  # - physicaldisk  # Physical disk devices
+  # - physicalmemory  # Physical memory devices
+  # - poweradapter  # Power adapter
+  # - sound  # Audio devices
+
+  # System, software and desktop details (optional)
+  # - bootmgr  # Boot manager
+  # - btrfs  # BTRFS volumes (platform-dependent)
+  # - cpucache  # CPU cache
+  # - cpuusage  # CPU usage
+  # - colors  # Terminal color palette
+  # - cursor  # Cursor theme
+  # - datetime  # Date and time
+  # - diskio  # Disk I/O
+  # - de  # Desktop environment
+  # - dns  # DNS servers
+  # - editor  # Default text editor
+  # - font  # System font
+  # - icons  # Icon theme
+  # - initsystem  # Init system
+  # - lm  # Login manager
+  # - loadavg  # System load average
+  # - media  # Media information
+  # - opencl  # OpenCL support
+  # - opengl  # OpenGL support
+  # - player  # Media player
+  # - processes  # Process summary
+  # - swap  # Swap memory
+  # - terminalfont  # Terminal font
+  # - terminalsize  # Terminal dimensions
+  # - terminaltheme  # Terminal theme
+  # - top  # Top processes by CPU, memory, or disk I/O
+  # - theme  # System theme
+  # - tpm  # Trusted Platform Module
+  # - users  # Logged-in users
+  # - version  # W1F3/Fastfetch version information
+  # - vulkan  # Vulkan support
+  # - wallpaper  # Wallpaper information
+  # - wm  # Window manager
+  # - wmtheme  # Window-manager theme
+  # - zpool  # ZFS storage pools (platform-dependent)
+
+  # Network information (optional; some modules can make network requests)
+  # - localip  # Local IP addresses
+  # - netio  # Network I/O
+  # - publicip  # Public IP address (network lookup)
+  # - wifi  # Wi-Fi networks/status
+  # - weather  # Weather (network lookup)

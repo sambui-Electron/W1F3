@@ -183,7 +183,7 @@ func TestDiskInfoUsesMultilineList(t *testing.T) {
 }
 
 func TestVersionFlagIsDocumented(t *testing.T) {
-	if !strings.Contains(version, "0.5.0") {
+	if !strings.Contains(version, "0.5.1") {
 		t.Fatalf("unexpected W1F3 version: %s", version)
 	}
 }

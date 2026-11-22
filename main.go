@@ -19,7 +19,7 @@ import (
 	"unicode"
 )
 
-const version = "0.5.0"
+const version = "0.5.1"
 const defaultConfigURL = "https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.yaml"
 
 var downloadDefaultConfig = func() ([]byte, error) {
@@ -1397,7 +1397,7 @@ func currentUserHost() string {
 	return user + "@" + host
 }
 
-func fatal(err error) { fmt.Fprintln(os.Stderr, "fetch:", err); os.Exit(1) }
+func fatal(err error) { fmt.Fprintln(os.Stderr, "W1F3:", err); os.Exit(1) }
 func printHelp() {
-	fmt.Printf("W1F3 %s\n\nUsage: fetch [options]\n\n  --config PATH     YAML config (default ~/.config/fetch/config.yaml)\n  --logo NAME       Fastfetch logo name (cached in ~/.config/fetch/logos/)\n  --logo-file PATH  Custom ANSI/ASCII logo file\n  --fastfetch PATH  Fastfetch executable path\n  --speed FLOAT     Rotation speed\n  --size FLOAT      Logo scale\n  --depth FLOAT     3D extrusion depth\n  --no-info         Hide system information\n  --no-color        Disable colors\n  --frames N        Stop after N rendered frames\n  -v, --version     Print version\n\nMouse: click and drag the logo to rotate; release to fling.\nKeyboard: Q / Esc / Enter exits; +/- changes spin speed.\n", version)
+	fmt.Printf("W1F3 %s\n\nUsage: W1F3 [options]\n\n  --config PATH     YAML config (default ~/.config/fetch/config.yaml)\n  --logo NAME       Fastfetch logo name (cached in ~/.config/fetch/logos/)\n  --logo-file PATH  Custom ANSI/ASCII logo file\n  --fastfetch PATH  Fastfetch executable path\n  --speed FLOAT     Rotation speed\n  --size FLOAT      Logo scale\n  --depth FLOAT     3D extrusion depth\n  --no-info         Hide system information\n  --no-color        Disable colors\n  --frames N        Stop after N rendered frames\n  -v, --version     Print version\n\nMouse: click and drag the logo to rotate; release to fling.\nKeyboard: Q / Esc / Enter exits; +/- changes spin speed.\n", version)
 }

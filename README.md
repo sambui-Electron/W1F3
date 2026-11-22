@@ -2,7 +2,7 @@
 
 **W1F3** (pronounced “Wife”) is a Windows-native, animated 3D system-information viewer inspired by [areofyl/fetch](https://github.com/areofyl/fetch) and powered by [Fastfetch](https://github.com/fastfetch-cli/fastfetch).
 
-W1F3 is written in Go and targets Windows 10/11 x64.
+W1F3 is written in Go and targets Windows 10/11 x64. The primary executable and terminal command are `w1f3.exe` and `W1F3`; `fetch` remains as a compatibility alias.
 
 ## Features
 
@@ -14,7 +14,7 @@ W1F3 is written in Go and targets Windows 10/11 x64.
 - First-run default configuration downloaded from this repository's `main/config.yaml` on GitHub.
 - JSON Schema for YAML editor validation and completion.
 - Cached logos stored under `%USERPROFILE%\.config\fetch\logos\`.
-- `fetch -v` / `fetch --version` reports the installed version.
+- `W1F3 -v` / `W1F3 --version` reports the installed version. `fetch` remains available as a backward-compatible alias.
 
 ## Requirements
 
@@ -37,8 +37,8 @@ W1F3 is written in Go and targets Windows 10/11 x64.
 4. Restart the terminal and run:
 
    ```powershell
-   fetch -v
-   fetch
+   W1F3 -v
+   W1F3
    ```
 
 The installer upgrades the existing installation in `%LOCALAPPDATA%\Programs\Fetch`, preserves the user's configuration and logo cache, installs the schema, and updates the user PATH. It does **not** install or overwrite `config.yaml`.
@@ -93,7 +93,7 @@ Or directly:
 $env:GOOS = 'windows'
 $env:GOARCH = 'amd64'
 $env:CGO_ENABLED = '0'
-go build -trimpath -ldflags '-s -w' -o fetch.exe .
+go build -trimpath -ldflags '-s -w' -o w1f3.exe .
 ```
 
 Run tests and static checks:
@@ -106,14 +106,14 @@ go vet ./...
 ## Useful commands
 
 ```powershell
-fetch -v
-fetch --help
-fetch --logo "Windows 11"
-fetch --logo arch
-fetch --speed 0.8
-fetch --size 1.2 --depth 1.8
-fetch --no-info
-fetch --no-color
+W1F3 -v
+W1F3 --help
+W1F3 --logo "Windows 11"
+W1F3 --logo arch
+W1F3 --speed 0.8
+W1F3 --size 1.2 --depth 1.8
+W1F3 --no-info
+W1F3 --no-color
 ```
 
 ## Project layout
@@ -129,7 +129,8 @@ W1F3/
 ├── build.ps1
 ├── install.ps1
 ├── uninstall.ps1
-├── fetch.cmd
+├── w1f3.cmd
+├── fetch.cmd               # Backward-compatible alias
 ├── go.mod
 ├── .gitignore
 ├── LICENSE

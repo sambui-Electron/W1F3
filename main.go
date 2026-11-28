@@ -97,11 +97,9 @@ type Config struct {
 	LogoPaddingRight int
 }
 
-// supportedInfoFields mirrors the current Fastfetch information modules W1F3
-// exposes, plus the Windows-native fields rendered by W1F3 itself. W1F3-owned
-// presentation modules (logo, title, separator, break) and option-driven modules
-// (command, custom) are excluded because W1F3 owns its layout and does not expose
-// Fastfetch's per-module configuration language.
+// supportedInfoFields lists the information modules W1F3 can display.
+// Presentation modules (break, custom, command, colors) are parsed separately
+// and rendered directly by W1F3 rather than requested from Fastfetch.
 var supportedInfoFields = []string{
 	"battery", "bios", "bluetooth", "bluetoothradio", "board", "bootmgr",
 	"brightness", "btrfs", "camera", "chassis", "codec", "cpu", "cpucache", "cpuusage",

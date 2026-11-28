@@ -1471,19 +1471,9 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 			if len(line.Lines) > 0 {
 				labelColor := line.LabelColor
 				if labelColor == "" { labelColor = cCyan }
-				separator := line.Separator
-				if separator == "" { separator = cfg.Separator }
-				if separator == "" { separator = ": " }
-				label := clip(line.Label, infoW)
-				labelWidth := displayWidth(label)
-				put(canvas, contentX, y, label, labelColor, infoW)
-				put(canvas, contentX+labelWidth, y, separator, cDim, displayWidth(separator))
-				valueX := contentX + labelWidth + displayWidth(separator)
-				if len(line.Lines) > 0 && valueX < contentX+infoW {
-					put(canvas, valueX, y, clip(line.Lines[0], infoW-(valueX-contentX)), cWhite, infoW-(valueX-contentX))
-				}
+				put(canvas, contentX, y, clip(line.Label+":", infoW), labelColor, infoW)
 				y++
-				for _, item := range line.Lines[1:] {
+				for _, item := range line.Lines {
 					if y >= rows { break }
 					put(canvas, contentX+4, y, clip(item, infoW-4), cWhite, infoW-4)
 					y++

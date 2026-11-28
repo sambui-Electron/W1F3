@@ -13,7 +13,7 @@ W1F3 is written in Go and targets Windows 10/11 x64. The primary executable and 
 - User configuration at `%USERPROFILE%\.config\fetch\config.yaml`.
 - First-run default configuration downloaded from this repository's `main/config.yaml` on GitHub.
 - Linked JSON Schema for YAML editor validation and completion.
-- Configurable information catalog with 70 selectable fields: 66 queried from Fastfetch plus four Windows-native W1F3 fields (`disk`, `kernel`, `shell`, and `uptime`). The catalog follows Fastfetch 2.71.0 and omits six presentation/command modules that W1F3 handles itself or cannot configure (`logo`, `title`, `separator`, `break`, `command`, and `custom`).
+- Ordered Fastfetch-style YAML modules with per-module labels and colors, custom section rows, PowerShell command modules, blank-line breaks, and terminal color swatches. The information catalog supports 70 field names: 65 queried from Fastfetch, four collected natively by W1F3 (`disk`, `kernel`, `shell`, and `uptime`), and `colors` rendered natively. Logo and separator settings are also handled directly by W1F3.
 - Cached logos stored under `%USERPROFILE%\.config\fetch\logos\`.
 - `W1F3 -v` / `W1F3 --version` reports the installed version. `fetch` remains available as a backward-compatible alias.
 
@@ -80,7 +80,7 @@ The `modules` list is rendered in the exact order written in YAML. It supports:
 - Information modules such as `host`, `cpu`, `gpu`, `memory`, `disk`, `os`, `kernel`, `bios`, `packages`, `shell`, `de`, `lm`, `wm`, `wmtheme`, `terminal`, `uptime`, and `datetime`.
 - `key` and `keyColor` for the module label and its color.
 - `custom` modules for section headings and separators.
-- `command` modules for locally executed commands. Supported shells are PowerShell, PowerShell 7 (`pwsh`), and `cmd`. Commands have a three-second timeout. Only use commands from configuration files you trust.
+- `command` modules for locally executed commands. Supported shells are PowerShell, PowerShell 7 (`pwsh`), and `cmd`. Commands have a three-second timeout and their output is cached for 60 seconds. Only use commands from configuration files you trust.
 - `colors` for the 16 terminal-color swatches, with `paddingLeft` and `symbol` options.
 
 The `display.separator` value is inserted between each module key and its value. The `logo` mapping supports a custom file source, numbered `$1`–`$9` true-color replacements, and top/right padding. W1F3 also retains its own flat animation settings (`refresh`, `speed`, `size`, `depth`, `spin`, `height`, adaptive scaling, mouse, color, info visibility, and box).

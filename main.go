@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"sync"
 	"strings"
 	"time"
 	"unicode"
@@ -153,9 +154,8 @@ func configRoot() string {
 
 func configPath() string { return filepath.Join(configRoot(), "config.yaml") }
 
-// parseYAMLConfig intentionally supports the scalar/list subset used by Fetch's
-// config. It keeps the executable dependency-free while accepting ordinary YAML
-// comments, quoted values, booleans, numbers and block lists.
+// parseYAMLConfig accepts both the legacy flat YAML format and the structured
+// module-oriented YAML format used for Fastfetch-style layouts.
 func parseYAMLConfig(data []byte, base Config) (Config, error) {
 	return parseAdvancedYAMLConfig(data, base)
 }
@@ -323,17 +323,22 @@ func buildConfiguredInfo(mods map[string]any, modules []ModuleConfig, native Nat
 	return out
 }
 
+var osAgeOnce sync.Once
+var osAgeValue string
+
 func windowsOSAge() string {
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_OperatingSystem).InstallDate.ToString('yyyy-MM-dd')")
-	out, err := cmd.Output()
-	if err != nil { return "" }
-	installed, err := time.Parse("2006-01-02", strings.TrimSpace(string(out)))
-	if err != nil { return "" }
-	days := int(time.Since(installed).Hours()/24)
-	if days < 0 { return "" }
-	years, rem := days/365, days%365
-	if years > 0 { return fmt.Sprintf("%d years, %d days", years, rem) }
-	return fmt.Sprintf("%d days", days)
+	osAgeOnce.Do(func() {
+		cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_OperatingSystem).InstallDate.ToString('yyyy-MM-dd')")
+		out, err := cmd.Output()
+		if err != nil { return }
+		installed, err := time.Parse("2006-01-02", strings.TrimSpace(string(out)))
+		if err != nil { return }
+		days := int(time.Since(installed).Hours()/24)
+		if days < 0 { return }
+		years, rem := days/365, days%365
+		if years > 0 { osAgeValue = fmt.Sprintf("%d years, %d days", years, rem) } else { osAgeValue = fmt.Sprintf("%d days", days) }
+	})
+	return osAgeValue
 }
 
 func ansiColor(name string) string {

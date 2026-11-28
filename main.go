@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -164,9 +165,8 @@ func configRoot() string {
 
 func configPath() string { return filepath.Join(configRoot(), "config.yaml") }
 
-// parseYAMLConfig intentionally supports the scalar/list subset used by Fetch's
-// config. It keeps the executable dependency-free while accepting ordinary YAML
-// comments, quoted values, booleans, numbers and block lists.
+// yamlDocument is the typed top-level W1F3 YAML contract. Nested module and logo
+// nodes are validated explicitly so unsupported Fastfetch options fail clearly.
 type yamlDocument struct {
 	Logo             yaml.Node `yaml:"logo"`
 	LogoFile         string    `yaml:"logo_file"`
@@ -1246,7 +1246,24 @@ func stripInfoANSI(input string) (string, string) {
 	return out.String(), color
 }
 
+type commandCacheEntry struct {
+	value string
+	at time.Time
+}
+
+var commandCacheState = struct {
+	sync.Mutex
+	entries map[string]commandCacheEntry
+}{entries: make(map[string]commandCacheEntry)}
+
 func runConfiguredCommand(shell, command string) (string, error) {
+	cacheKey := shell + "\x00" + command
+	commandCacheState.Lock()
+	if entry, ok := commandCacheState.entries[cacheKey]; ok && time.Since(entry.at) < time.Minute {
+		commandCacheState.Unlock()
+		return entry.value, nil
+	}
+	commandCacheState.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	var cmd *exec.Cmd
@@ -1264,7 +1281,11 @@ func runConfiguredCommand(shell, command string) (string, error) {
 	}
 	out, err := cmd.Output()
 	if err != nil { return "", fmt.Errorf("configured command failed: %w", err) }
-	return strings.TrimSpace(string(out)), nil
+	value := strings.TrimSpace(string(out))
+	commandCacheState.Lock()
+	commandCacheState.entries[cacheKey] = commandCacheEntry{value: value, at: time.Now()}
+	commandCacheState.Unlock()
+	return value, nil
 }
 
 func applyLogoPalette(data string, palette map[string]string) string {

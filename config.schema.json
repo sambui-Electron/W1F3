@@ -284,7 +284,6 @@
               "cpu",
               "cpucache",
               "cpuusage",
-              "colors",
               "cursor",
               "datetime",
               "display",

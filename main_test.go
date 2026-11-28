@@ -456,3 +456,55 @@ func TestGenericFormatterHandlesAdditionalFastfetchShapes(t *testing.T) {
 		t.Fatalf("generic map fallback lost scalar information: %q", fallback)
 	}
 }
+
+func TestStructuredYAMLModulesPreserveOrderAndStyles(t *testing.T) {
+	data := []byte(`logo:
+  type: file
+  source: "./ascii.txt"
+  color:
+    "1": "#CDD6F4"
+  padding:
+    top: 1
+    right: 3
+display:
+  separator: " "
+renderer:
+  mouse: false
+  adaptive_scale: false
+color: false
+modules:
+  - type: break
+  - type: custom
+    format: "Hardware"
+  - type: cpu
+    key: "CPU"
+    key_color: green
+  - type: colors
+    padding_left: 4
+    symbol: circle
+`)
+	cfg, err := parseYAMLConfig(data, defaultConfig())
+	if err != nil { t.Fatal(err) }
+	if cfg.LogoFile != "./ascii.txt" || cfg.LogoColors["1"] != "#CDD6F4" || cfg.LogoPaddingTop != 1 || cfg.LogoPaddingRight != 3 {
+		t.Fatalf("logo options not parsed: %#v", cfg)
+	}
+	if cfg.Mouse || cfg.AdaptiveScale || cfg.Color { t.Fatalf("explicit false values were ignored: %#v", cfg) }
+	if cfg.Separator != " " { t.Fatalf("separator = %q", cfg.Separator) }
+	if got := configuredFields(cfg); !equalStrings(got, []string{"cpu"}) { t.Fatalf("fetch fields = %#v", got) }
+	info := buildConfiguredInfo(map[string]any{"cpu": map[string]any{"cpu":"Test CPU"}}, cfg.Modules, NativeInfo{})
+	if len(info) != 4 || !info[0].Break || info[1].Custom != "Hardware" || info[2].Label != "CPU" || info[2].KeyColor == "" || !info[3].Colors {
+		t.Fatalf("module order/style was not preserved: %#v", info)
+	}
+}
+
+func TestStructuredYAMLRejectsUnknownModuleTypes(t *testing.T) {
+	_, err := parseYAMLConfig([]byte("modules:\n  - type: imaginary_module\n"), defaultConfig())
+	if err == nil { t.Fatal("unknown module type should be rejected") }
+}
+
+func TestLogoColorSlotsBecomeTrueColorANSI(t *testing.T) {
+	got := applyLogoSlots("A$1B$2", map[string]string{"1":"#CDD6F4","2":"#A6E3A1"})
+	if !strings.Contains(got, "\x1b[38;2;205;214;244m") || !strings.Contains(got, "\x1b[38;2;166;227;161m") {
+		t.Fatalf("logo color slots were not expanded: %q", got)
+	}
+}

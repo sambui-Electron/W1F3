@@ -409,41 +409,74 @@ func TestConfigRejectsUnknownAndDuplicateFields(t *testing.T) {
 	}
 }
 
-func TestDefaultConfigAndSchemaExposeStructuredModules(t *testing.T) {
+func TestDefaultConfigAndSchemaExposeNativeLayout(t *testing.T) {
 	configBytes, err := os.ReadFile("config.yaml")
 	if err != nil { t.Fatal(err) }
-	if !strings.HasPrefix(string(configBytes), "# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json\n") {
-		t.Fatal("config.yaml must link to the canonical JSON schema on its first line")
-	}
+	const schemaURL = "# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json\n"
+	if !strings.HasPrefix(string(configBytes), schemaURL) { t.Fatal("config.yaml must link to the canonical schema") }
 	cfg, err := parseYAMLConfig(configBytes, defaultConfig())
 	if err != nil { t.Fatalf("stock config is invalid: %v", err) }
-	if len(cfg.Modules) == 0 { t.Fatal("stock config should define ordered modules") }
-	types := map[string]bool{}
-	for _, m := range cfg.Modules { types[m.Type] = true }
-	for _, required := range []string{"host","cpu","gpu","memory","disk","os","kernel","bios","packages","shell","de","lm","wm","wmtheme","terminal","os_age","uptime","datetime","colors"} {
-		if !types[required] { t.Errorf("stock config is missing module %q", required) }
+	if len(cfg.Layout) == 0 { t.Fatal("stock config should define a native layout") }
+	if cfg.LogoFile != "C:/Users/PC/.config/fastfetch/ascii.txt" { t.Fatalf("logo path was not ported: %q", cfg.LogoFile) }
+	if cfg.LogoPalette["1"] != "#CDD6F4" || cfg.LogoPalette["9"] != "#74C7EC" { t.Fatalf("logo palette was not ported: %#v", cfg.LogoPalette) }
+	if cfg.LogoPaddingTop != 1 || cfg.LogoPaddingRight != 3 { t.Fatalf("logo spacing was not ported: %#v", cfg) }
+	if cfg.Separator != " " { t.Fatalf("separator = %q", cfg.Separator) }
+	fields := layoutFields(cfg.Layout)
+	for _, required := range []string{"host","cpu","gpu","memory","disk","os","kernel","bios","packages","shell","de","lm","wm","wmtheme","terminal","uptime","datetime"} {
+		found := false
+		for _, f := range fields { if f == required { found = true; break } }
+		if !found { t.Errorf("layout is missing field %q", required) }
 	}
 	var schema struct {
 		ID string `json:"$id"`
-		Properties map[string]struct {
-			Items struct { Enum []string `json:"enum"` } `json:"items"`
-		} `json:"properties"`
+		Properties map[string]json.RawMessage `json:"properties"`
 	}
 	schemaBytes, err := os.ReadFile("config.schema.json")
 	if err != nil { t.Fatal(err) }
 	if err := json.Unmarshal(schemaBytes, &schema); err != nil { t.Fatalf("invalid JSON schema: %v", err) }
-	const schemaURL = "https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json"
-	if schema.ID != schemaURL { t.Fatalf("schema $id = %q, want %q", schema.ID, schemaURL) }
-	if _, ok := schema.Properties["modules"]; !ok { t.Fatal("schema is missing properties.modules") }
-	fieldSchema, ok := schema.Properties["fields"]
-	if !ok { t.Fatal("schema is missing legacy properties.fields") }
-	if len(fieldSchema.Items.Enum) != len(supportedInfoFields) {
-		t.Fatalf("legacy schema has %d fields, runtime supports %d", len(fieldSchema.Items.Enum), len(supportedInfoFields))
+	if schema.ID != "https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json" { t.Fatalf("unexpected schema ID: %s", schema.ID) }
+	if _, ok := schema.Properties["layout"]; !ok { t.Fatal("schema is missing W1F3-native layout") }
+	if _, ok := schema.Properties["modules"]; ok { t.Fatal("Fastfetch-style modules syntax should not be part of W1F3 config") }
+}
+
+func TestNativeLayoutPreservesOrderAndStyles(t *testing.T) {
+	data := []byte(`separator: " "
+layout:
+  - type: blank
+  - type: section
+    text: "Hardware"
+    color: gray
+  - type: field
+    field: cpu
+    label: "CPU"
+    color: green
+  - type: palette
+    padding_left: 4
+    symbol: circle
+`)
+	cfg, err := parseYAMLConfig(data, defaultConfig())
+	if err != nil { t.Fatal(err) }
+	info := buildLayoutInfo(map[string]any{"cpu": map[string]any{"cpu":"Test CPU"}}, cfg.Layout, NativeInfo{})
+	if len(info) != 4 || !info[0].Break || info[1].Custom != "Hardware" || info[1].CustomColor == "" || info[2].Label != "CPU" || info[2].KeyColor == "" || !info[3].Colors {
+		t.Fatalf("layout order/style was not preserved: %#v", info)
 	}
-	schemaFields := append([]string(nil), fieldSchema.Items.Enum...)
-	runtimeFields := append([]string(nil), supportedInfoFields...)
-	sort.Strings(schemaFields); sort.Strings(runtimeFields)
-	if !equalStrings(schemaFields, runtimeFields) { t.Fatalf("legacy schema field enum does not match runtime catalog") }
+	if got := layoutFields(cfg.Layout); !equalStrings(got, []string{"cpu"}) { t.Fatalf("fetch fields = %#v", got) }
+}
+
+func TestNativeLayoutRejectsUnknownTypesAndFields(t *testing.T) {
+	for _, data := range []string{
+		"layout:\n  - type: module\n",
+		"layout:\n  - type: field\n    field: not_a_field\n",
+	} {
+		if _, err := parseYAMLConfig([]byte(data), defaultConfig()); err == nil { t.Errorf("expected invalid layout to be rejected: %s", data) }
+	}
+}
+
+func TestLogoColorSlotsBecomeTrueColorANSI(t *testing.T) {
+	got := applyLogoSlots("A$1B$2", map[string]string{"1":"#CDD6F4","2":"#A6E3A1"})
+	if !strings.Contains(got, "\x1b[38;2;205;214;244m") || !strings.Contains(got, "\x1b[38;2;166;227;161m") {
+		t.Fatalf("logo color slots were not expanded: %q", got)
+	}
 }
 
 func TestGenericFormatterHandlesAdditionalFastfetchShapes(t *testing.T) {

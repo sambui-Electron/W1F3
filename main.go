@@ -1416,7 +1416,7 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 			if line.Kind == "blank" || line.Kind == "custom" || line.Kind == "palette" {
 				contentRows++
 			} else if len(line.Lines) > 0 {
-				contentRows += 1 + len(line.Lines)
+				if line.Separator != "" { contentRows += len(line.Lines) } else { contentRows += 1 + len(line.Lines) }
 			} else {
 				contentRows++
 			}
@@ -1469,12 +1469,27 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 			if len(line.Lines) > 0 {
 				labelColor := line.LabelColor
 				if labelColor == "" { labelColor = cCyan }
-				put(canvas, contentX, y, clip(line.Label+":", infoW), labelColor, infoW)
-				y++
-				for _, item := range line.Lines {
-					if y >= rows { break }
-					put(canvas, contentX+4, y, clip(item, infoW-4), cWhite, infoW-4)
+				if line.Separator != "" {
+					label := clip(line.Label, infoW)
+					labelWidth := displayWidth(label)
+					put(canvas, contentX, y, label, labelColor, infoW)
+					put(canvas, contentX+labelWidth, y, line.Separator, cDim, displayWidth(line.Separator))
+					valueX := contentX + labelWidth + displayWidth(line.Separator)
+					put(canvas, valueX, y, clip(line.Lines[0], infoW-(valueX-contentX)), cWhite, infoW-(valueX-contentX))
 					y++
+					for _, item := range line.Lines[1:] {
+						if y >= rows { break }
+						put(canvas, contentX+4, y, clip(item, infoW-4), cWhite, infoW-4)
+						y++
+					}
+				} else {
+					put(canvas, contentX, y, clip(line.Label+":", infoW), labelColor, infoW)
+					y++
+					for _, item := range line.Lines {
+						if y >= rows { break }
+						put(canvas, contentX+4, y, clip(item, infoW-4), cWhite, infoW-4)
+						y++
+					}
 				}
 				continue
 			}

@@ -233,8 +233,27 @@ func parseYAMLConfig(data []byte, base Config) (Config, error) {
 				Color map[string]string `yaml:"color"`
 				Padding struct { Top int `yaml:"top"`; Right int `yaml:"right"` } `yaml:"padding"`
 			}
+			for j := 0; j < len(doc.Logo.Content); j += 2 {
+				key := doc.Logo.Content[j].Value
+				if key != "type" && key != "source" && key != "color" && key != "padding" {
+					return cfg, fmt.Errorf("logo: unknown property %q", key)
+				}
+			}
 			if err := doc.Logo.Decode(&logo); err != nil { return cfg, fmt.Errorf("logo: %w", err) }
-			if logo.Type != "" && logo.Type != "file" { return cfg, fmt.Errorf("unsupported logo type %q; expected file", logo.Type) }
+			if logo.Type != "file" { return cfg, fmt.Errorf("unsupported logo type %q; expected file", logo.Type) }
+			if strings.TrimSpace(logo.Source) == "" { return cfg, errors.New("logo.source is required when logo.type is file") }
+			if logo.Padding.Top < 0 || logo.Padding.Right < 0 { return cfg, errors.New("logo padding cannot be negative") }
+			if len(doc.Logo.Content) > 0 {
+				for j := 0; j < len(doc.Logo.Content); j += 2 {
+					if doc.Logo.Content[j].Value == "padding" {
+						paddingNode := doc.Logo.Content[j+1]
+						for k := 0; k < len(paddingNode.Content); k += 2 {
+							name := paddingNode.Content[k].Value
+							if name != "top" && name != "right" { return cfg, fmt.Errorf("logo.padding: unknown property %q", name) }
+						}
+					}
+				}
+			}
 			cfg.LogoFile = logo.Source
 			cfg.LogoPalette = logo.Color
 			cfg.LogoPaddingTop, cfg.LogoPaddingRight = logo.Padding.Top, logo.Padding.Right
@@ -266,6 +285,13 @@ func parseYAMLConfig(data []byte, base Config) (Config, error) {
 			}
 			module.Type = strings.ToLower(strings.TrimSpace(module.Type))
 			if module.Type == "" { return cfg, fmt.Errorf("modules[%d]: missing type", i) }
+			if module.PaddingLeft < 0 { return cfg, fmt.Errorf("modules[%d]: paddingLeft cannot be negative", i) }
+			if module.KeyColor != "" {
+				switch strings.ToLower(module.KeyColor) {
+				case "gray", "grey", "green", "yellow", "blue", "magenta", "cyan", "red", "white":
+				default: return cfg, fmt.Errorf("modules[%d]: unsupported keyColor %q", i, module.KeyColor)
+				}
+			}
 			switch module.Type {
 			case "break", "custom", "command", "colors":
 				if module.Type == "custom" && module.Format == "" { return cfg, fmt.Errorf("modules[%d]: custom module requires format", i) }
@@ -294,7 +320,7 @@ func parseYAMLConfig(data []byte, base Config) (Config, error) {
 	seen := make(map[string]bool, len(cfg.Fields))
 	for _, field := range cfg.Fields {
 		if !isSupportedInfoField(field) { return cfg, fmt.Errorf("unsupported information field %q; see config.schema.json for available fields", field) }
-		if seen[field] { return cfg, fmt.Errorf("duplicate information field %q", field) }
+		if len(cfg.Modules) == 0 && seen[field] { return cfg, fmt.Errorf("duplicate information field %q", field) }
 		seen[field] = true
 	}
 	if cfg.Refresh < 0.2 { cfg.Refresh = 0.2 }

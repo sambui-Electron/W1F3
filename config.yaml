@@ -1,115 +1,117 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json
-# W1F3 configuration
-# Stored at %USERPROFILE%\.config\fetch\config.yaml.
-# The schema URL above enables YAML editor validation and completion.
+# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/feature/fastfetch-style-yaml/config.schema.json
+# W1F3 configuration - structured YAML, not JSON/JSONC.
 
-# Fastfetch logo name. The first successful extraction is cached in the logos/ folder.
-logo: "Windows 11"
-logo_file: ""
-fastfetch_path: ""
+logo:
+  type: file
+  source: "C:/Users/PC/.config/fastfetch/ascii.txt"
+  color:
+    "1": "#CDD6F4"
+    "2": "#F2CDCD"
+    "3": "#F5C2E7"
+    "4": "#F5E0DC"
+    "5": "#F9E2AF"
+    "6": "#A6E3A1"
+    "7": "#94E2D5"
+    "8": "#89DCEB"
+    "9": "#74C7EC"
+  padding:
+    top: 1
+    right: 3
 
-# Refresh live system information once per second.
-refresh: 1.0
+display:
+  separator: " "
 
-# 3D renderer
-speed: 0.45
-size: 1.0
-depth: 1.0
-spin: "xy"
-height: 32
-# Adaptive multiplier scales the logo with terminal dimensions, in addition to `size`.
-# It never shrinks below 1.0x and is capped at 1.5x.
-# If `size` is greater than 1.5, adaptive scaling is disabled.
-adaptive_scale: true
-adaptive_strength: 0.65
-adaptive_min: 1.0
-adaptive_max: 1.5
-mouse: true
+renderer:
+  refresh: 1.0
+  speed: 0.45
+  size: 1.0
+  depth: 1.0
+  spin: xy
+  height: 32
+  adaptive_scale: true
+  adaptive_strength: 0.65
+  adaptive_min: 1.0
+  adaptive_max: 1.5
+  mouse: true
 
-# Display
 color: true
 show_info: true
 box: false
 
-# Information fields are displayed in this order.
-# The active entries below are the default compact layout.
-# Uncomment optional entries to display them, or remove/comment entries to hide them.
-# Every field below is selectable and validated by config.schema.json.
-fields:
-  # Default fields
-  - os  # Operating system
-  - kernel  # Kernel (W1F3 Windows-native)
-  - uptime  # Uptime (W1F3 Windows-native)
-  - shell  # Shell (W1F3 Windows-native)
-  - display  # Display
-  - terminal  # Terminal
-  - cpu  # CPU
-  - gpu  # GPU
-  - memory  # Memory
-  - disk  # Disk (W1F3 Windows-native, named volumes)
-  - host  # Host
-  - packages  # Packages
-  - bios  # BIOS
-  - board  # Motherboard
-  - locale  # Locale
+modules:
+  - type: break
+  - type: custom
+    format: "┌──────────────────────Hardware──────────────────────┐"
+  - type: host
+    key: "󰌢  PC"
+    key_color: green
+  - type: cpu
+    key: "│ ├󰻠 "
+    key_color: green
+  - type: gpu
+    key: "│ ├󰍹 "
+    key_color: green
+  - type: memory
+    key: "│ ├󰑭 "
+    key_color: green
+  - type: disk
+    key: "└ └󰋊 "
+    key_color: green
+  - type: custom
+    format: "└────────────────────────────────────────────────────┘"
+  - type: break
 
-  # Hardware and devices (optional)
-  # - battery  # Battery level and state
-  # - bluetooth  # Bluetooth devices
-  # - bluetoothradio  # Bluetooth radio
-  # - brightness  # Display brightness
-  # - camera  # Camera devices
-  # - codec  # Hardware video codec support
-  # - chassis  # Chassis
-  # - gamepad  # Game controllers
-  # - keyboard  # Keyboard devices
-  # - monitor  # Monitor information
-  # - mouse  # Mouse devices
-  # - physicaldisk  # Physical disk devices
-  # - physicalmemory  # Physical memory devices
-  # - poweradapter  # Power adapter
-  # - sound  # Audio devices
+  - type: custom
+    format: "┌──────────────────────Software──────────────────────┐"
+  - type: os
+    key: "󰄛  OS"
+    key_color: yellow
+  - type: kernel
+    key: "│ ├ "
+    key_color: yellow
+  - type: bios
+    key: "│ ├󰖡 "
+    key_color: yellow
+  - type: packages
+    key: "│ ├󰏗 "
+    key_color: yellow
+  - type: shell
+    key: "└ └󰞷 "
+    key_color: yellow
+  - type: break
 
-  # System, software and desktop details (optional)
-  # - bootmgr  # Boot manager
-  # - btrfs  # BTRFS volumes (platform-dependent)
-  # - cpucache  # CPU cache
-  # - cpuusage  # CPU usage
-  # - colors  # Terminal color palette
-  # - cursor  # Cursor theme
-  # - datetime  # Date and time
-  # - diskio  # Disk I/O
-  # - de  # Desktop environment
-  # - dns  # DNS servers
-  # - editor  # Default text editor
-  # - font  # System font
-  # - icons  # Icon theme
-  # - initsystem  # Init system
-  # - lm  # Login manager
-  # - loadavg  # System load average
-  # - media  # Media information
-  # - opencl  # OpenCL support
-  # - opengl  # OpenGL support
-  # - player  # Media player
-  # - processes  # Process summary
-  # - swap  # Swap memory
-  # - terminalfont  # Terminal font
-  # - terminalsize  # Terminal dimensions
-  # - terminaltheme  # Terminal theme
-  # - top  # Top processes by CPU, memory, or disk I/O
-  # - theme  # System theme
-  # - tpm  # Trusted Platform Module
-  # - users  # Logged-in users
-  # - version  # W1F3/Fastfetch version information
-  # - vulkan  # Vulkan support
-  # - wallpaper  # Wallpaper information
-  # - wm  # Window manager
-  # - wmtheme  # Window-manager theme
-  # - zpool  # ZFS storage pools (platform-dependent)
+  - type: de
+    key: "󰧨  DE"
+    key_color: blue
+  - type: lm
+    key: "│ ├󰍁 "
+    key_color: blue
+  - type: wm
+    key: "│ ├󱂬 "
+    key_color: blue
+  - type: wmtheme
+    key: "│ ├󰉦 "
+    key_color: blue
+  - type: terminal
+    key: "└ └󰆍 "
+    key_color: blue
+  - type: custom
+    format: "└────────────────────────────────────────────────────┘"
+  - type: break
 
-  # Network information (optional; some modules can make network requests)
-  # - localip  # Local IP addresses
-  # - netio  # Network I/O
-  # - publicip  # Public IP address (network lookup)
-  # - wifi  # Wi-Fi networks/status
-  # - weather  # Weather (network lookup)
+  - type: custom
+    format: "┌────────────────────Uptime / Age / DT───────────────┐"
+  - type: os_age
+    key: "  ›  OS Age  "
+    key_color: magenta
+  - type: uptime
+    key: "  ›  Uptime  "
+    key_color: magenta
+  - type: datetime
+    key: "  ›  DateTime  "
+    key_color: magenta
+  - type: custom
+    format: "└────────────────────────────────────────────────────┘"
+  - type: colors
+    padding_left: 18
+    symbol: circle

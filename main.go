@@ -179,14 +179,14 @@ type yamlDocument struct {
 	Depth float64 `yaml:"depth"`
 	Spin string `yaml:"spin"`
 	Height int `yaml:"height"`
-	AdaptiveScale bool `yaml:"adaptive_scale"`
+	AdaptiveScale *bool `yaml:"adaptive_scale"`
 	AdaptiveStrength float64 `yaml:"adaptive_strength"`
 	AdaptiveMin float64 `yaml:"adaptive_min"`
 	AdaptiveMax float64 `yaml:"adaptive_max"`
-	Mouse bool `yaml:"mouse"`
-	Color bool `yaml:"color"`
-	ShowInfo bool `yaml:"show_info"`
-	Box bool `yaml:"box"`
+	Mouse *bool `yaml:"mouse"`
+	Color *bool `yaml:"color"`
+	ShowInfo *bool `yaml:"show_info"`
+	Box *bool `yaml:"box"`
 	Fields []string `yaml:"fields"`
 	Display struct { Separator string `yaml:"separator"` } `yaml:"display"`
 	Renderer struct {
@@ -235,14 +235,14 @@ func parseAdvancedYAMLConfig(data []byte, base Config) (Config, error) {
 	if doc.Depth != 0 { cfg.Depth = doc.Depth }
 	if doc.Spin != "" { cfg.Spin = doc.Spin }
 	if doc.Height != 0 { cfg.Height = doc.Height }
-	if doc.AdaptiveScale { cfg.AdaptiveScale = true }
+	if doc.AdaptiveScale != nil { cfg.AdaptiveScale = *doc.AdaptiveScale }
 	if doc.AdaptiveStrength != 0 { cfg.AdaptiveStrength = doc.AdaptiveStrength }
 	if doc.AdaptiveMin != 0 { cfg.AdaptiveMin = doc.AdaptiveMin }
 	if doc.AdaptiveMax != 0 { cfg.AdaptiveMax = doc.AdaptiveMax }
-	if doc.Mouse { cfg.Mouse = true }
-	if doc.Color { cfg.Color = true }
-	if doc.ShowInfo { cfg.ShowInfo = true }
-	if doc.Box { cfg.Box = true }
+	if doc.Mouse != nil { cfg.Mouse = *doc.Mouse }
+	if doc.Color != nil { cfg.Color = *doc.Color }
+	if doc.ShowInfo != nil { cfg.ShowInfo = *doc.ShowInfo }
+	if doc.Box != nil { cfg.Box = *doc.Box }
 	if doc.Fields != nil { cfg.Fields = doc.Fields }
 	if doc.Display.Separator != "" { cfg.Separator = doc.Display.Separator }
 	if doc.Renderer.Refresh != 0 { cfg.Refresh = doc.Renderer.Refresh }
@@ -251,11 +251,11 @@ func parseAdvancedYAMLConfig(data []byte, base Config) (Config, error) {
 	if doc.Renderer.Depth != 0 { cfg.Depth = doc.Renderer.Depth }
 	if doc.Renderer.Spin != "" { cfg.Spin = doc.Renderer.Spin }
 	if doc.Renderer.Height != 0 { cfg.Height = doc.Renderer.Height }
-	if doc.Renderer.AdaptiveScale { cfg.AdaptiveScale = true }
+	if doc.Renderer.AdaptiveScale != nil { cfg.AdaptiveScale = *doc.Renderer.AdaptiveScale }
 	if doc.Renderer.AdaptiveStrength != 0 { cfg.AdaptiveStrength = doc.Renderer.AdaptiveStrength }
 	if doc.Renderer.AdaptiveMin != 0 { cfg.AdaptiveMin = doc.Renderer.AdaptiveMin }
 	if doc.Renderer.AdaptiveMax != 0 { cfg.AdaptiveMax = doc.Renderer.AdaptiveMax }
-	if doc.Renderer.Mouse { cfg.Mouse = true }
+	if doc.Renderer.Mouse != nil { cfg.Mouse = *doc.Renderer.Mouse }
 	if len(doc.Modules) > 0 {
 		cfg.Modules = doc.Modules
 		cfg.Fields = configuredFields(cfg)

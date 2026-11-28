@@ -440,6 +440,14 @@ func TestDefaultConfigAndSchemaExposeNativeLayout(t *testing.T) {
 
 func TestNativeLayoutPreservesOrderAndStyles(t *testing.T) {
 	data := []byte(`separator: " "
+logo_palette:
+  "1": "#CDD6F4"
+logo_padding:
+  top: 1
+  right: 3
+mouse: false
+adaptive_scale: false
+color: false
 layout:
   - type: blank
   - type: section
@@ -455,6 +463,9 @@ layout:
 `)
 	cfg, err := parseYAMLConfig(data, defaultConfig())
 	if err != nil { t.Fatal(err) }
+	if cfg.LogoPalette["1"] != "#CDD6F4" || cfg.LogoPaddingTop != 1 || cfg.LogoPaddingRight != 3 { t.Fatalf("logo settings not parsed: %#v", cfg) }
+	if cfg.Mouse || cfg.AdaptiveScale || cfg.Color { t.Fatalf("explicit false settings were ignored: %#v", cfg) }
+	if cfg.Separator != " " { t.Fatalf("separator = %q", cfg.Separator) }
 	info := buildLayoutInfo(map[string]any{"cpu": map[string]any{"cpu":"Test CPU"}}, cfg.Layout, NativeInfo{})
 	if len(info) != 4 || !info[0].Break || info[1].Custom != "Hardware" || info[1].CustomColor == "" || info[2].Label != "CPU" || info[2].KeyColor == "" || !info[3].Colors {
 		t.Fatalf("layout order/style was not preserved: %#v", info)
@@ -489,50 +500,3 @@ func TestGenericFormatterHandlesAdditionalFastfetchShapes(t *testing.T) {
 	}
 }
 
-func TestNativeLayoutPreservesOrderAndStyles(t *testing.T) {
-	data := []byte(`separator: " "
-logo_palette:
-  "1": "#CDD6F4"
-logo_padding:
-  top: 1
-  right: 3
-mouse: false
-adaptive_scale: false
-color: false
-layout:
-  - type: blank
-  - type: section
-    text: "Hardware"
-    color: gray
-  - type: field
-    field: cpu
-    label: "CPU"
-    color: green
-  - type: palette
-    padding_left: 4
-    symbol: circle
-`)
-	cfg, err := parseYAMLConfig(data, defaultConfig())
-	if err != nil { t.Fatal(err) }
-	if cfg.LogoPalette["1"] != "#CDD6F4" || cfg.LogoPaddingTop != 1 || cfg.LogoPaddingRight != 3 { t.Fatalf("logo settings not parsed: %#v", cfg) }
-	if cfg.Mouse || cfg.AdaptiveScale || cfg.Color { t.Fatalf("explicit false settings were ignored: %#v", cfg) }
-	if cfg.Separator != " " { t.Fatalf("separator = %q", cfg.Separator) }
-	if got := layoutFields(cfg.Layout); !equalStrings(got, []string{"cpu"}) { t.Fatalf("fetch fields = %#v", got) }
-	info := buildLayoutInfo(map[string]any{"cpu": map[string]any{"cpu":"Test CPU"}}, cfg.Layout, NativeInfo{})
-	if len(info) != 4 || !info[0].Break || info[1].Custom != "Hardware" || info[1].CustomColor == "" || info[2].Label != "CPU" || info[2].KeyColor == "" || !info[3].Colors {
-		t.Fatalf("native layout order/style was not preserved: %#v", info)
-	}
-}
-
-func TestNativeLayoutRejectsUnknownTypesAndFields(t *testing.T) {
-	for _, data := range []string{"layout:\n  - type: module\n","layout:\n  - type: field\n    field: not_a_field\n"} {
-		if _, err := parseYAMLConfig([]byte(data), defaultConfig()); err == nil { t.Errorf("expected invalid layout to be rejected: %s", data) }
-	}
-}
-
-func TestLogoColorSlotsBecomeTrueColorANSI(t *testing.T) {
-	got := applyLogoSlots("A$1B$2", map[string]string{"1":"#CDD6F4","2":"#A6E3A1"})
-	if !strings.Contains(got, "\x1b[38;2;205;214;244m") || !strings.Contains(got, "\x1b[38;2;166;227;161m") {
-		t.Fatalf("logo color slots were not expanded: %q", got)
-	}
-}

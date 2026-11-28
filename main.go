@@ -249,7 +249,7 @@ func parseAdvancedYAMLConfig(data []byte, base Config) (Config, error) {
 			if item.Field != "os_age" && !isSupportedInfoField(item.Field) {
 				return cfg, fmt.Errorf("unsupported layout field %q", item.Field)
 			}
-		case "text", "blank", "palette":
+		case "section", "blank", "palette":
 		default:
 			return cfg, fmt.Errorf("unsupported layout item type %q", item.Type)
 		}
@@ -276,7 +276,7 @@ func buildLayoutInfo(mods map[string]any, layout []LayoutItem, native NativeInfo
 		switch item.Type {
 		case "blank":
 			out = append(out, InfoLine{Break:true})
-		case "text":
+		case "section":
 			out = append(out, InfoLine{Custom:item.Text, CustomColor:ansiColor(item.Color)})
 		case "palette":
 			out = append(out, InfoLine{Colors:true, PaddingLeft:item.PaddingLeft, Symbol:item.Symbol})

@@ -297,6 +297,10 @@ func buildConfiguredInfo(mods map[string]any, modules []ModuleConfig, native Nat
 		case "custom": out = append(out, InfoLine{Custom:m.Format})
 		case "colors": out = append(out, InfoLine{Colors:true, PaddingLeft:m.PaddingLeft, Symbol:m.Symbol})
 		default:
+			if t == "os_age" {
+				if age := windowsOSAge(); age != "" { out = append(out, InfoLine{Label:m.Key, Value:age, KeyColor:ansiColor(m.KeyColor)}) }
+				continue
+			}
 			if !isSupportedInfoField(t) { continue }
 			lines := buildInfo(mods, []string{t}, native)
 			for _, line := range lines {
@@ -307,6 +311,19 @@ func buildConfiguredInfo(mods map[string]any, modules []ModuleConfig, native Nat
 		}
 	}
 	return out
+}
+
+func windowsOSAge() string {
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_OperatingSystem).InstallDate.ToString('yyyy-MM-dd')")
+	out, err := cmd.Output()
+	if err != nil { return "" }
+	installed, err := time.Parse("2006-01-02", strings.TrimSpace(string(out)))
+	if err != nil { return "" }
+	days := int(time.Since(installed).Hours()/24)
+	if days < 0 { return "" }
+	years, rem := days/365, days%365
+	if years > 0 { return fmt.Sprintf("%d years, %d days", years, rem) }
+	return fmt.Sprintf("%d days", days)
 }
 
 func ansiColor(name string) string {
@@ -1310,8 +1327,11 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 		put(canvas, contentX, startY, clip(userHost, infoW), "\x1b[1;38;5;81m", infoW)
 		put(canvas, contentX, startY+1, strings.Repeat("─", minInt(infoW, maxInt(12, len(userHost)))), cDim, infoW)
 		y := startY + 2
-		keyW := minInt(11, maxInt(5, infoW/4))
-		valueW := infoW - keyW - 2
+		keyW := minInt(22, maxInt(5, infoW/4))
+		for _, line := range info { if n:=len([]rune(line.Label)); n>keyW && n<infoW-4 { keyW=n } }
+		sep := ": "
+		if cfg.Separator != "" { sep = cfg.Separator }
+		valueW := infoW - keyW - len([]rune(sep))
 		for _, line := range info {
 			if y >= rows { break }
 			if line.Break { y++; continue }
@@ -1340,8 +1360,8 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 				continue
 			}
 			put(canvas, contentX, y, clip(line.Label, keyW), keyColor, keyW)
-			put(canvas, contentX+keyW, y, cfg.Separator+": ", cDim, 2)
-			put(canvas, contentX+keyW+2, y, clip(line.Value, valueW), cWhite, valueW)
+			put(canvas, contentX+keyW, y, sep, cDim, len([]rune(sep)))
+			put(canvas, contentX+keyW+len([]rune(sep)), y, clip(line.Value, valueW), cWhite, valueW)
 			y++
 		}
 	}

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"context"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"gopkg.in/yaml.v3"
 )
 
 const version = "0.5.2"
@@ -57,6 +59,17 @@ const (
 	cDim   = "\x1b[38;5;240m"
 )
 
+type ModuleConfig struct {
+	Type         string `yaml:"type"`
+	Key          string `yaml:"key"`
+	KeyColor     string `yaml:"keyColor"`
+	Format       string `yaml:"format"`
+	Text         string `yaml:"text"`
+	Shell        string `yaml:"shell"`
+	PaddingLeft  int    `yaml:"paddingLeft"`
+	Symbol       string `yaml:"symbol"`
+}
+
 type Config struct {
 	Logo             string
 	LogoFile         string
@@ -76,6 +89,11 @@ type Config struct {
 	ShowInfo         bool
 	Box              bool
 	Fields           []string
+	Modules          []ModuleConfig
+	Separator        string
+	LogoPalette      map[string]string
+	LogoPaddingTop   int
+	LogoPaddingRight int
 }
 
 // supportedInfoFields mirrors the current Fastfetch information modules W1F3
@@ -97,7 +115,7 @@ var supportedInfoFields = []string{
 }
 
 var nativeInfoFields = map[string]bool{
-	"disk": true, "kernel": true, "shell": true, "uptime": true,
+	"disk": true, "kernel": true, "shell": true, "uptime": true, "colors": true,
 }
 
 func isSupportedInfoField(field string) bool {
@@ -131,7 +149,7 @@ func defaultConfig() Config {
 	return Config{
 		Logo: "Windows 11", Refresh: 1.0, Speed: 0.45, Size: 1.0,
 		Depth: 1.0, Spin: "xy", Height: 32, AdaptiveScale: true, AdaptiveStrength: 0.65, AdaptiveMin: 1.0, AdaptiveMax: 1.5, Mouse: true,
-		Color: true, ShowInfo: true, Box: false,
+		Color: true, ShowInfo: true, Box: false, Separator: ": ",
 		Fields: []string{"os", "kernel", "uptime", "shell", "display", "terminal", "cpu", "gpu", "memory", "disk", "host", "packages", "bios", "board", "locale"},
 	}
 }
@@ -149,145 +167,142 @@ func configPath() string { return filepath.Join(configRoot(), "config.yaml") }
 // parseYAMLConfig intentionally supports the scalar/list subset used by Fetch's
 // config. It keeps the executable dependency-free while accepting ordinary YAML
 // comments, quoted values, booleans, numbers and block lists.
+type yamlDocument struct {
+	Logo             yaml.Node `yaml:"logo"`
+	LogoFile         string    `yaml:"logo_file"`
+	FastfetchPath    string    `yaml:"fastfetch_path"`
+	Refresh          float64   `yaml:"refresh"`
+	Speed            float64   `yaml:"speed"`
+	Size             float64   `yaml:"size"`
+	Depth            float64   `yaml:"depth"`
+	Spin             string    `yaml:"spin"`
+	Height           int       `yaml:"height"`
+	AdaptiveScale    bool      `yaml:"adaptive_scale"`
+	AdaptiveStrength float64   `yaml:"adaptive_strength"`
+	AdaptiveMin      float64   `yaml:"adaptive_min"`
+	AdaptiveMax      float64   `yaml:"adaptive_max"`
+	Mouse            bool      `yaml:"mouse"`
+	Color            bool      `yaml:"color"`
+	ShowInfo         bool      `yaml:"show_info"`
+	Box              bool      `yaml:"box"`
+	Fields           []string  `yaml:"fields"`
+	Modules          []yaml.Node `yaml:"modules"`
+	Display          struct { Separator string `yaml:"separator"` } `yaml:"display"`
+	Separator        string    `yaml:"separator"`
+	LogoPalette      map[string]string `yaml:"logo_palette"`
+	LogoPadding      struct {
+		Top int `yaml:"top"`
+		Right int `yaml:"right"`
+	} `yaml:"logo_padding"`
+}
+
 func parseYAMLConfig(data []byte, base Config) (Config, error) {
 	cfg := base
-	section := ""
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := strings.TrimRight(scanner.Text(), " \t\r")
-		trim := strings.TrimSpace(line)
-		if trim == "" || strings.HasPrefix(trim, "#") || trim == "---" || trim == "..." {
-			continue
-		}
-		if strings.HasPrefix(trim, "- ") {
-			if section != "fields" {
-				return cfg, fmt.Errorf("config line %d: list item outside fields", lineNo)
+	var doc yamlDocument
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&doc); err != nil {
+		return cfg, fmt.Errorf("parse YAML config: %w", err)
+	}
+	cfg.LogoFile = doc.LogoFile
+	cfg.Fastfetch = doc.FastfetchPath
+	if doc.Refresh != 0 { cfg.Refresh = doc.Refresh }
+	if doc.Speed != 0 { cfg.Speed = doc.Speed }
+	if doc.Size != 0 { cfg.Size = doc.Size }
+	if doc.Depth != 0 { cfg.Depth = doc.Depth }
+	if doc.Spin != "" { cfg.Spin = strings.ToLower(doc.Spin) }
+	if doc.Height != 0 { cfg.Height = doc.Height }
+	cfg.AdaptiveScale = doc.AdaptiveScale
+	if doc.AdaptiveStrength != 0 { cfg.AdaptiveStrength = doc.AdaptiveStrength }
+	if doc.AdaptiveMin != 0 { cfg.AdaptiveMin = doc.AdaptiveMin }
+	if doc.AdaptiveMax != 0 { cfg.AdaptiveMax = doc.AdaptiveMax }
+	cfg.Mouse, cfg.Color, cfg.ShowInfo, cfg.Box = doc.Mouse, doc.Color, doc.ShowInfo, doc.Box
+	if doc.Separator != "" { cfg.Separator = doc.Separator }
+	if doc.Display.Separator != "" { cfg.Separator = doc.Display.Separator }
+	if doc.Logo.Kind != 0 {
+		switch doc.Logo.Kind {
+		case yaml.ScalarNode:
+			cfg.Logo = doc.Logo.Value
+		case yaml.MappingNode:
+			var logo struct {
+				Type string `yaml:"type"`
+				Source string `yaml:"source"`
+				Color map[string]string `yaml:"color"`
+				Padding struct { Top int `yaml:"top"`; Right int `yaml:"right"` } `yaml:"padding"`
 			}
-			v := unquoteYAML(stripYAMLComment(strings.TrimSpace(strings.TrimPrefix(trim, "- "))))
-			if v != "" {
-				cfg.Fields = append(cfg.Fields, strings.ToLower(v))
-			}
-			continue
-		}
-		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
-			return cfg, fmt.Errorf("config line %d: unsupported nested YAML value", lineNo)
-		}
-		pair := strings.SplitN(trim, ":", 2)
-		if len(pair) != 2 {
-			return cfg, fmt.Errorf("config line %d: expected key: value", lineNo)
-		}
-		key := strings.ToLower(strings.TrimSpace(pair[0]))
-		raw := strings.TrimSpace(stripYAMLComment(strings.TrimSpace(pair[1])))
-		if raw == "" {
-			if key == "fields" {
-				cfg.Fields = nil
-				section = "fields"
-				continue
-			}
-			return cfg, fmt.Errorf("config line %d: empty value for %s", lineNo, key)
-		}
-		section = ""
-		value := unquoteYAML(raw)
-		parseFloat := func() (float64, error) { return strconv.ParseFloat(value, 64) }
-		parseBool := func() (bool, error) { return strconv.ParseBool(strings.ToLower(value)) }
-		parseInt := func() (int, error) { n, e := strconv.Atoi(value); return n, e }
-		var err error
-		switch key {
-		case "logo":
-			cfg.Logo = value
-		case "logo_file":
-			cfg.LogoFile = value
-		case "fastfetch_path":
-			cfg.Fastfetch = value
-		case "refresh":
-			cfg.Refresh, err = parseFloat()
-		case "speed":
-			cfg.Speed, err = parseFloat()
-		case "size":
-			cfg.Size, err = parseFloat()
-		case "depth":
-			cfg.Depth, err = parseFloat()
-		case "spin":
-			cfg.Spin = strings.ToLower(value)
-		case "height":
-			cfg.Height, err = parseInt()
-		case "adaptive_scale":
-			cfg.AdaptiveScale, err = parseBool()
-		case "adaptive_strength":
-			cfg.AdaptiveStrength, err = parseFloat()
-		case "adaptive_min":
-			cfg.AdaptiveMin, err = parseFloat()
-		case "adaptive_max":
-			cfg.AdaptiveMax, err = parseFloat()
-		case "mouse":
-			cfg.Mouse, err = parseBool()
-		case "color":
-			cfg.Color, err = parseBool()
-		case "show_info":
-			cfg.ShowInfo, err = parseBool()
-		case "box":
-			cfg.Box, err = parseBool()
-		case "fields":
-			cfg.Fields = nil
-			for _, item := range strings.Split(value, ",") {
-				item = strings.TrimSpace(item)
-				if item != "" {
-					cfg.Fields = append(cfg.Fields, strings.ToLower(unquoteYAML(item)))
-				}
-			}
+			if err := doc.Logo.Decode(&logo); err != nil { return cfg, fmt.Errorf("logo: %w", err) }
+			if logo.Type != "" && logo.Type != "file" { return cfg, fmt.Errorf("unsupported logo type %q; expected file", logo.Type) }
+			cfg.LogoFile = logo.Source
+			cfg.LogoPalette = logo.Color
+			cfg.LogoPaddingTop, cfg.LogoPaddingRight = logo.Padding.Top, logo.Padding.Right
 		default:
-			return cfg, fmt.Errorf("config line %d: unknown key %q", lineNo, key)
-		}
-		if err != nil {
-			return cfg, fmt.Errorf("config line %d (%s): %w", lineNo, key, err)
+			return cfg, errors.New("logo must be a string or mapping")
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return cfg, err
+	if len(doc.LogoPalette) > 0 { cfg.LogoPalette = doc.LogoPalette }
+	if doc.LogoPadding.Top != 0 { cfg.LogoPaddingTop = doc.LogoPadding.Top }
+	if doc.LogoPadding.Right != 0 { cfg.LogoPaddingRight = doc.LogoPadding.Right }
+	if len(doc.Modules) > 0 {
+		cfg.Modules = nil
+		cfg.Fields = nil
+		for i, node := range doc.Modules {
+			module := ModuleConfig{}
+			if node.Kind == yaml.ScalarNode {
+				module.Type = strings.ToLower(strings.TrimSpace(node.Value))
+			} else if node.Kind == yaml.MappingNode {
+				for j := 0; j < len(node.Content); j += 2 {
+					key := node.Content[j].Value
+					switch key {
+					case "type", "key", "keyColor", "format", "text", "shell", "paddingLeft", "symbol":
+					default: return cfg, fmt.Errorf("modules[%d]: unknown property %q", i, key)
+					}
+				}
+				if err := node.Decode(&module); err != nil { return cfg, fmt.Errorf("modules[%d]: %w", i, err) }
+			} else {
+				return cfg, fmt.Errorf("modules[%d] must be a string or mapping", i)
+			}
+			module.Type = strings.ToLower(strings.TrimSpace(module.Type))
+			if module.Type == "" { return cfg, fmt.Errorf("modules[%d]: missing type", i) }
+			switch module.Type {
+			case "break", "custom", "command", "colors":
+				if module.Type == "custom" && module.Format == "" { return cfg, fmt.Errorf("modules[%d]: custom module requires format", i) }
+				if module.Type == "command" {
+					if module.Text == "" { return cfg, fmt.Errorf("modules[%d]: command module requires text", i) }
+					if module.Shell == "" { module.Shell = "powershell" }
+					if module.Shell != "powershell" && module.Shell != "pwsh" && module.Shell != "cmd" { return cfg, fmt.Errorf("modules[%d]: unsupported command shell %q", i, module.Shell) }
+				}
+				if module.Type == "colors" && module.Symbol != "" && module.Symbol != "circle" && module.Symbol != "square" { return cfg, fmt.Errorf("modules[%d]: symbol must be circle or square", i) }
+			default:
+				if !isSupportedInfoField(module.Type) { return cfg, fmt.Errorf("modules[%d]: unsupported module type %q", i, module.Type) }
+				cfg.Fields = append(cfg.Fields, module.Type)
+			}
+			cfg.Modules = append(cfg.Modules, module)
+		}
+	} else if doc.Fields != nil {
+		cfg.Fields = make([]string, 0, len(doc.Fields))
+		for _, field := range doc.Fields { cfg.Fields = append(cfg.Fields, strings.ToLower(strings.TrimSpace(field))) }
 	}
-	seenFields := make(map[string]bool, len(cfg.Fields))
+	for key, color := range cfg.LogoPalette {
+		if len(key) != 1 || key[0] < '1' || key[0] > '9' || len(color) != 7 || color[0] != '#' {
+			return cfg, fmt.Errorf("invalid logo color slot %q: expected slots 1-9 and #RRGGBB values", key)
+		}
+		if _, err := strconv.ParseUint(color[1:], 16, 32); err != nil { return cfg, fmt.Errorf("invalid logo color for slot %s: %w", key, err) }
+	}
+	seen := make(map[string]bool, len(cfg.Fields))
 	for _, field := range cfg.Fields {
-		field = strings.ToLower(strings.TrimSpace(field))
-		if !isSupportedInfoField(field) {
-			return cfg, fmt.Errorf("unsupported information field %q; see config.schema.json for available fields", field)
-		}
-		if seenFields[field] {
-			return cfg, fmt.Errorf("duplicate information field %q", field)
-		}
-		seenFields[field] = true
+		if !isSupportedInfoField(field) { return cfg, fmt.Errorf("unsupported information field %q; see config.schema.json for available fields", field) }
+		if seen[field] { return cfg, fmt.Errorf("duplicate information field %q", field) }
+		seen[field] = true
 	}
-	if len(cfg.Fields) == 0 {
-		cfg.Fields = []string{}
-	}
-	if cfg.Refresh < 0.2 {
-		cfg.Refresh = 0.2
-	}
-	if cfg.Speed < 0 {
-		cfg.Speed = 0
-	}
-	if cfg.Size < 0.2 {
-		cfg.Size = 0.2
-	}
-	if cfg.Depth < 0.1 {
-		cfg.Depth = 0.1
-	}
-	if cfg.Height < 0 {
-		cfg.Height = 0
-	}
-	if cfg.AdaptiveStrength < 0 {
-		cfg.AdaptiveStrength = 0
-	}
-	if cfg.AdaptiveMin < 1.0 {
-		cfg.AdaptiveMin = 1.0
-	}
-	if cfg.AdaptiveMax < cfg.AdaptiveMin {
-		cfg.AdaptiveMax = cfg.AdaptiveMin
-	}
-	if cfg.AdaptiveMax > 1.5 {
-		cfg.AdaptiveMax = 1.5
-	}
+	if cfg.Refresh < 0.2 { cfg.Refresh = 0.2 }
+	if cfg.Speed < 0 { cfg.Speed = 0 }
+	if cfg.Size < 0.2 { cfg.Size = 0.2 }
+	if cfg.Depth < 0.1 { cfg.Depth = 0.1 }
+	if cfg.Height < 0 { cfg.Height = 0 }
+	if cfg.AdaptiveStrength < 0 { cfg.AdaptiveStrength = 0 }
+	if cfg.AdaptiveMin < 1 { cfg.AdaptiveMin = 1 }
+	if cfg.AdaptiveMax < cfg.AdaptiveMin { cfg.AdaptiveMax = cfg.AdaptiveMin }
+	if cfg.AdaptiveMax > 1.5 { cfg.AdaptiveMax = 1.5 }
 	return cfg, nil
 }
 

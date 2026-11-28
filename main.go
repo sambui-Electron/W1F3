@@ -242,8 +242,12 @@ func parseAdvancedYAMLConfig(data []byte, base Config) (Config, error) {
 	if cfg.AdaptiveMin < 1 { cfg.AdaptiveMin = 1 }
 	if cfg.AdaptiveMax < cfg.AdaptiveMin { cfg.AdaptiveMax = cfg.AdaptiveMin }
 	if cfg.AdaptiveMax > 1.5 { cfg.AdaptiveMax = 1.5 }
+	seenFields := map[string]bool{}
 	for _, f := range cfg.Fields {
+		f = strings.ToLower(strings.TrimSpace(f))
 		if !isSupportedInfoField(f) { return cfg, fmt.Errorf("unsupported information field %q", f) }
+		if seenFields[f] { return cfg, fmt.Errorf("duplicate information field %q", f) }
+		seenFields[f] = true
 	}
 	for _, item := range cfg.Layout {
 		switch item.Type {

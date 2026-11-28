@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/feature/fastfetch-style-yaml/config.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json
 # W1F3 configuration - structured YAML, not JSON/JSONC.
 
 logo:

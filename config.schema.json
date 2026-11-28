@@ -1,208 +1,258 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json",
-  "title": "W1F3 configuration",
-  "description": "Configuration schema for W1F3. The repository config.yaml links to this schema using the YAML language server directive.",
+  "$id": "https://raw.githubusercontent.com/sambui-Electron/W1F3/feature/fastfetch-style-yaml/config.schema.json",
+  "title": "W1F3 YAML configuration",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "logo": {
-      "type": "string",
-      "default": "Windows 11",
-      "description": "Fastfetch logo name to render."
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "file"
+              ]
+            },
+            "source": {
+              "type": "string"
+            },
+            "color": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^#[0-9A-Fa-f]{6}$"
+              }
+            },
+            "padding": {
+              "type": "object",
+              "properties": {
+                "top": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "right": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "source"
+          ],
+          "additionalProperties": false
+        }
+      ]
     },
     "logo_file": {
-      "type": "string",
-      "default": "",
-      "description": "Optional custom ASCII/ANSI logo path, relative to config.yaml or absolute."
+      "type": "string"
     },
     "fastfetch_path": {
-      "type": "string",
-      "default": "",
-      "description": "Optional path to fastfetch.exe. Empty uses PATH."
+      "type": "string"
     },
     "refresh": {
       "type": "number",
-      "minimum": 0.2,
-      "default": 1.0,
-      "description": "System information refresh interval in seconds."
+      "minimum": 0.2
     },
     "speed": {
       "type": "number",
-      "minimum": 0,
-      "default": 0.45,
-      "description": "Automatic rotation speed."
+      "minimum": 0
     },
     "size": {
       "type": "number",
-      "minimum": 0.2,
-      "default": 1.0,
-      "description": "User-controlled base logo scale."
+      "minimum": 0.2
     },
     "depth": {
       "type": "number",
-      "minimum": 0.1,
-      "default": 1.0,
-      "description": "3D extrusion depth."
+      "minimum": 0.1
     },
     "spin": {
-      "type": "string",
       "enum": [
         "x",
         "y",
         "xy"
-      ],
-      "default": "xy",
-      "description": "Automatic rotation axes."
+      ]
     },
     "height": {
       "type": "integer",
-      "minimum": 0,
-      "default": 32,
-      "description": "Legacy logo height cap when adaptive scaling is disabled."
+      "minimum": 0
     },
     "adaptive_scale": {
-      "type": "boolean",
-      "default": true,
-      "description": "Enable window-size-aware scaling."
+      "type": "boolean"
     },
     "adaptive_strength": {
       "type": "number",
       "minimum": 0,
-      "maximum": 1,
-      "default": 0.65,
-      "description": "Strength of the terminal-size scaling response."
+      "maximum": 1
     },
     "adaptive_min": {
       "type": "number",
-      "minimum": 1,
-      "default": 1.0,
-      "description": "Lower adaptive multiplier bound. Values below 1 are clamped to 1."
+      "minimum": 1
     },
     "adaptive_max": {
       "type": "number",
       "minimum": 1,
-      "maximum": 1.5,
-      "default": 1.5,
-      "description": "Upper adaptive multiplier bound. Hard-capped at 1.5; disabled when the user base scale is above 1.5."
+      "maximum": 1.5
     },
     "mouse": {
-      "type": "boolean",
-      "default": true,
-      "description": "Enable click-and-drag logo rotation."
+      "type": "boolean"
     },
     "color": {
-      "type": "boolean",
-      "default": true,
-      "description": "Enable ANSI colors."
+      "type": "boolean"
     },
     "show_info": {
-      "type": "boolean",
-      "default": true,
-      "description": "Show the system information panel."
+      "type": "boolean"
     },
     "box": {
-      "type": "boolean",
-      "default": false,
-      "description": "Draw a border around the information panel."
+      "type": "boolean"
+    },
+    "display": {
+      "type": "object",
+      "properties": {
+        "separator": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "renderer": {
+      "type": "object",
+      "properties": {
+        "refresh": {
+          "type": "number",
+          "minimum": 0.2
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0
+        },
+        "size": {
+          "type": "number",
+          "minimum": 0.2
+        },
+        "depth": {
+          "type": "number",
+          "minimum": 0.1
+        },
+        "spin": {
+          "enum": [
+            "x",
+            "y",
+            "xy"
+          ]
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "adaptive_scale": {
+          "type": "boolean"
+        },
+        "adaptive_strength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "adaptive_min": {
+          "type": "number",
+          "minimum": 1
+        },
+        "adaptive_max": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 1.5
+        },
+        "mouse": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
     },
     "fields": {
       "type": "array",
-      "uniqueItems": true,
-      "default": [
-        "os",
-        "kernel",
-        "uptime",
-        "shell",
-        "display",
-        "terminal",
-        "cpu",
-        "gpu",
-        "memory",
-        "disk",
-        "host",
-        "packages",
-        "bios",
-        "board",
-        "locale"
-      ],
       "items": {
-        "type": "string",
-        "enum": [
-          "battery",
-          "bios",
-          "bluetooth",
-          "bluetoothradio",
-          "board",
-          "bootmgr",
-          "brightness",
-          "btrfs",
-          "camera",
-          "chassis",
-          "codec",
-          "cpu",
-          "cpucache",
-          "cpuusage",
-          "colors",
-          "cursor",
-          "datetime",
-          "display",
-          "disk",
-          "diskio",
-          "de",
-          "dns",
-          "editor",
-          "font",
-          "gamepad",
-          "gpu",
-          "host",
-          "icons",
-          "initsystem",
-          "keyboard",
-          "kernel",
-          "lm",
-          "loadavg",
-          "locale",
-          "localip",
-          "media",
-          "memory",
-          "monitor",
-          "mouse",
-          "netio",
-          "opencl",
-          "opengl",
-          "os",
-          "packages",
-          "physicaldisk",
-          "physicalmemory",
-          "player",
-          "poweradapter",
-          "processes",
-          "publicip",
-          "shell",
-          "sound",
-          "swap",
-          "terminal",
-          "terminalfont",
-          "terminalsize",
-          "terminaltheme",
-          "theme",
-          "tpm",
-          "top",
-          "uptime",
-          "users",
-          "version",
-          "vulkan",
-          "wallpaper",
-          "weather",
-          "wm",
-          "wifi",
-          "wmtheme",
-          "zpool"
-        ]
+        "type": "string"
       },
-      "description": "Information modules to display, in order. Any supported W1F3/Fastfetch information field may be selected. Fields unavailable on this Windows system are omitted by Fastfetch. Public IP and weather may perform network lookups.",
-      "minItems": 0
+      "uniqueItems": true
+    },
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "break",
+              "custom",
+              "colors",
+              "host",
+              "cpu",
+              "gpu",
+              "memory",
+              "disk",
+              "os",
+              "kernel",
+              "bios",
+              "packages",
+              "shell",
+              "de",
+              "lm",
+              "wm",
+              "wmtheme",
+              "terminal",
+              "os_age",
+              "uptime",
+              "datetime",
+              "display",
+              "locale"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "key_color": {
+            "type": "string",
+            "enum": [
+              "gray",
+              "grey",
+              "green",
+              "yellow",
+              "blue",
+              "magenta",
+              "cyan",
+              "red",
+              "white"
+            ]
+          },
+          "format": {
+            "type": "string"
+          },
+          "padding_left": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "symbol": {
+            "type": "string",
+            "enum": [
+              "circle",
+              "square"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
     }
   }
 }

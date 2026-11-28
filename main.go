@@ -201,7 +201,9 @@ type yamlDocument struct {
 
 func parseAdvancedYAMLConfig(data []byte, base Config) (Config, error) {
 	doc := yamlDocument{}
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&doc); err != nil {
 		return base, fmt.Errorf("parse YAML: %w", err)
 	}
 	cfg := base

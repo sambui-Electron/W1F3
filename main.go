@@ -1511,7 +1511,7 @@ func main() {
 	for {
 		now := time.Now()
 		if lastRefresh.IsZero() || now.Sub(lastRefresh) >= time.Duration(cfg.Refresh*float64(time.Second)) {
-			if fresh, e := fetchModules(ff, configuredFields(cfg)); e == nil {
+			if fresh, e := fetchModules(ff, layoutFieldsOrFields(cfg)); e == nil {
 				mods = fresh
 			}
 			if lastRefresh.IsZero() {

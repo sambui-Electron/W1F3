@@ -160,6 +160,169 @@ func parseYAMLConfig(data []byte, base Config) (Config, error) {
 	return parseAdvancedYAMLConfig(data, base)
 }
 
+type ModuleConfig struct {
+	Type string `yaml:"type"`
+	Key string `yaml:"key"`
+	KeyColor string `yaml:"key_color"`
+	Format string `yaml:"format"`
+	PaddingLeft int `yaml:"padding_left"`
+	Symbol string `yaml:"symbol"`
+}
+
+type yamlDocument struct {
+	Logo any `yaml:"logo"`
+	LogoFile string `yaml:"logo_file"`
+	FastfetchPath string `yaml:"fastfetch_path"`
+	Refresh float64 `yaml:"refresh"`
+	Speed float64 `yaml:"speed"`
+	Size float64 `yaml:"size"`
+	Depth float64 `yaml:"depth"`
+	Spin string `yaml:"spin"`
+	Height int `yaml:"height"`
+	AdaptiveScale bool `yaml:"adaptive_scale"`
+	AdaptiveStrength float64 `yaml:"adaptive_strength"`
+	AdaptiveMin float64 `yaml:"adaptive_min"`
+	AdaptiveMax float64 `yaml:"adaptive_max"`
+	Mouse bool `yaml:"mouse"`
+	Color bool `yaml:"color"`
+	ShowInfo bool `yaml:"show_info"`
+	Box bool `yaml:"box"`
+	Fields []string `yaml:"fields"`
+	Display struct { Separator string `yaml:"separator"` } `yaml:"display"`
+	Renderer struct {
+		Refresh float64 `yaml:"refresh"`
+		Speed float64 `yaml:"speed"`
+		Size float64 `yaml:"size"`
+		Depth float64 `yaml:"depth"`
+		Spin string `yaml:"spin"`
+		Height int `yaml:"height"`
+		AdaptiveScale bool `yaml:"adaptive_scale"`
+		AdaptiveStrength float64 `yaml:"adaptive_strength"`
+		AdaptiveMin float64 `yaml:"adaptive_min"`
+		AdaptiveMax float64 `yaml:"adaptive_max"`
+		Mouse bool `yaml:"mouse"`
+	} `yaml:"renderer"`
+	Modules []ModuleConfig `yaml:"modules"`
+}
+
+func parseAdvancedYAMLConfig(data []byte, base Config) (Config, error) {
+	doc := yamlDocument{}
+	if err := yaml.Unmarshal(data, &doc); err != nil { return base, fmt.Errorf("parse YAML: %w", err) }
+	cfg := base
+	// Preserve the legacy flat YAML format while accepting the structured layout.
+	if doc.Logo != nil {
+		switch v := doc.Logo.(type) {
+		case string: cfg.Logo = v
+		case map[string]interface{}:
+			if typ, _ := v["type"].(string); typ == "file" {
+				if src, ok := v["source"].(string); ok { cfg.LogoFile = src }
+			}
+			if colors, ok := v["color"].(map[string]interface{}); ok {
+				cfg.LogoColors = map[string]string{}
+				for k, value := range colors { cfg.LogoColors[k] = fmt.Sprint(value) }
+			}
+			if pad, ok := v["padding"].(map[string]interface{}); ok {
+				cfg.LogoPaddingTop = yamlInt(pad["top"])
+				cfg.LogoPaddingRight = yamlInt(pad["right"])
+			}
+		}
+	}
+	if doc.LogoFile != "" { cfg.LogoFile = doc.LogoFile }
+	if doc.FastfetchPath != "" { cfg.Fastfetch = doc.FastfetchPath }
+	if doc.Refresh != 0 { cfg.Refresh = doc.Refresh }
+	if doc.Speed != 0 { cfg.Speed = doc.Speed }
+	if doc.Size != 0 { cfg.Size = doc.Size }
+	if doc.Depth != 0 { cfg.Depth = doc.Depth }
+	if doc.Spin != "" { cfg.Spin = doc.Spin }
+	if doc.Height != 0 { cfg.Height = doc.Height }
+	if doc.AdaptiveScale { cfg.AdaptiveScale = true }
+	if doc.AdaptiveStrength != 0 { cfg.AdaptiveStrength = doc.AdaptiveStrength }
+	if doc.AdaptiveMin != 0 { cfg.AdaptiveMin = doc.AdaptiveMin }
+	if doc.AdaptiveMax != 0 { cfg.AdaptiveMax = doc.AdaptiveMax }
+	if doc.Mouse { cfg.Mouse = true }
+	if doc.Color { cfg.Color = true }
+	if doc.ShowInfo { cfg.ShowInfo = true }
+	if doc.Box { cfg.Box = true }
+	if doc.Fields != nil { cfg.Fields = doc.Fields }
+	if doc.Display.Separator != "" { cfg.Separator = doc.Display.Separator }
+	if doc.Renderer.Refresh != 0 { cfg.Refresh = doc.Renderer.Refresh }
+	if doc.Renderer.Speed != 0 { cfg.Speed = doc.Renderer.Speed }
+	if doc.Renderer.Size != 0 { cfg.Size = doc.Renderer.Size }
+	if doc.Renderer.Depth != 0 { cfg.Depth = doc.Renderer.Depth }
+	if doc.Renderer.Spin != "" { cfg.Spin = doc.Renderer.Spin }
+	if doc.Renderer.Height != 0 { cfg.Height = doc.Renderer.Height }
+	if doc.Renderer.AdaptiveScale { cfg.AdaptiveScale = true }
+	if doc.Renderer.AdaptiveStrength != 0 { cfg.AdaptiveStrength = doc.Renderer.AdaptiveStrength }
+	if doc.Renderer.AdaptiveMin != 0 { cfg.AdaptiveMin = doc.Renderer.AdaptiveMin }
+	if doc.Renderer.AdaptiveMax != 0 { cfg.AdaptiveMax = doc.Renderer.AdaptiveMax }
+	if doc.Renderer.Mouse { cfg.Mouse = true }
+	if len(doc.Modules) > 0 {
+		cfg.Modules = doc.Modules
+		cfg.Fields = configuredFields(cfg)
+	}
+	if len(cfg.Fields) == 0 && len(cfg.Modules) == 0 { cfg.Fields = []string{} }
+	for _, f := range cfg.Fields {
+		if !isSupportedInfoField(f) { return cfg, fmt.Errorf("unsupported information field %q", f) }
+	}
+	return cfg, nil
+}
+
+func yamlInt(v interface{}) int {
+	switch n := v.(type) {
+	case int: return n
+	case int64: return int(n)
+	case float64: return int(n)
+	default: return 0
+	}
+}
+
+func configuredFields(cfg Config) []string {
+	if len(cfg.Modules) == 0 { return cfg.Fields }
+	fields := []string{}
+	seen := map[string]bool{}
+	for _, m := range cfg.Modules {
+		t := strings.ToLower(strings.TrimSpace(m.Type))
+		if t == "" || t == "break" || t == "custom" || t == "colors" || seen[t] { continue }
+		if isSupportedInfoField(t) { fields = append(fields, t); seen[t] = true }
+	}
+	return fields
+}
+
+func buildConfiguredInfo(mods map[string]any, modules []ModuleConfig, native NativeInfo) []InfoLine {
+	out := []InfoLine{}
+	for _, m := range modules {
+		t := strings.ToLower(strings.TrimSpace(m.Type))
+		switch t {
+		case "break": out = append(out, InfoLine{Break:true})
+		case "custom": out = append(out, InfoLine{Custom:m.Format})
+		case "colors": out = append(out, InfoLine{Colors:true, PaddingLeft:m.PaddingLeft, Symbol:m.Symbol})
+		default:
+			if !isSupportedInfoField(t) { continue }
+			lines := buildInfo(mods, []string{t}, native)
+			for _, line := range lines {
+				if m.Key != "" { line.Label = m.Key }
+				line.KeyColor = ansiColor(m.KeyColor)
+				out = append(out, line)
+			}
+		}
+	}
+	return out
+}
+
+func ansiColor(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "gray", "grey": return "\x1b[90m"
+	case "green": return "\x1b[32m"
+	case "yellow": return "\x1b[33m"
+	case "blue": return "\x1b[34m"
+	case "magenta": return "\x1b[35m"
+	case "cyan": return "\x1b[36m"
+	case "red": return "\x1b[31m"
+	case "white": return "\x1b[37m"
+	default: return ""
+	}
+}
+
 func stripYAMLComment(s string) string {
 	quote := rune(0)
 	escaped := false

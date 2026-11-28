@@ -409,87 +409,41 @@ func TestConfigRejectsUnknownAndDuplicateFields(t *testing.T) {
 	}
 }
 
-func TestDefaultConfigAndSchemaExposeEverySupportedField(t *testing.T) {
+func TestDefaultConfigAndSchemaExposeStructuredModules(t *testing.T) {
 	configBytes, err := os.ReadFile("config.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
+	if err != nil { t.Fatal(err) }
 	if !strings.HasPrefix(string(configBytes), "# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json\n") {
-		t.Fatal("config.yaml must link to the published JSON schema on its first line")
+		t.Fatal("config.yaml must link to the canonical JSON schema on its first line")
 	}
 	cfg, err := parseYAMLConfig(configBytes, defaultConfig())
-	if err != nil {
-		t.Fatalf("stock config is invalid: %v", err)
+	if err != nil { t.Fatalf("stock config is invalid: %v", err) }
+	if len(cfg.Modules) == 0 { t.Fatal("stock config should define ordered modules") }
+	types := map[string]bool{}
+	for _, m := range cfg.Modules { types[m.Type] = true }
+	for _, required := range []string{"host","cpu","gpu","memory","disk","os","kernel","bios","packages","shell","de","lm","wm","wmtheme","terminal","os_age","uptime","datetime","colors"} {
+		if !types[required] { t.Errorf("stock config is missing module %q", required) }
 	}
-	if !equalStrings(cfg.Fields, defaultConfig().Fields) {
-		t.Fatalf("stock config fields differ from runtime defaults: %#v", cfg.Fields)
-	}
-	// Check the actual YAML list entries, including commented options. This
-	// avoids false positives such as matching "cpu" inside "cpuusage".
-	configCatalog := make(map[string]bool)
-	for _, line := range strings.Split(string(configBytes), "\n") {
-		line = strings.TrimSpace(line)
-		line = strings.TrimPrefix(line, "#")
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "- ") {
-			continue
-		}
-		field := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(line, "- "), "#", 2)[0])
-		if field == "" {
-			continue
-		}
-		if configCatalog[field] {
-			t.Errorf("field %q appears more than once in config.yaml", field)
-		}
-		configCatalog[field] = true
-	}
-	if len(configCatalog) != len(supportedInfoFields) {
-		t.Errorf("config.yaml catalog has %d fields, runtime supports %d", len(configCatalog), len(supportedInfoFields))
-	}
-	for _, field := range supportedInfoFields {
-		if !configCatalog[field] {
-			t.Errorf("default config should list %q as an active or commented selection", field)
-		}
-	}
-	for field := range configCatalog {
-		if !isSupportedInfoField(field) {
-			t.Errorf("config.yaml lists unsupported field %q", field)
-		}
-	}
-
 	var schema struct {
-		ID         string `json:"$id"`
+		ID string `json:"$id"`
 		Properties map[string]struct {
-			Items struct {
-				Enum []string `json:"enum"`
-			} `json:"items"`
+			Items struct { Enum []string `json:"enum"` } `json:"items"`
 		} `json:"properties"`
 	}
 	schemaBytes, err := os.ReadFile("config.schema.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(schemaBytes, &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v", err)
-	}
+	if err != nil { t.Fatal(err) }
+	if err := json.Unmarshal(schemaBytes, &schema); err != nil { t.Fatalf("invalid JSON schema: %v", err) }
 	const schemaURL = "https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json"
-	if schema.ID != schemaURL {
-		t.Fatalf("schema $id = %q, want %q", schema.ID, schemaURL)
-	}
+	if schema.ID != schemaURL { t.Fatalf("schema $id = %q, want %q", schema.ID, schemaURL) }
+	if _, ok := schema.Properties["modules"]; !ok { t.Fatal("schema is missing properties.modules") }
 	fieldSchema, ok := schema.Properties["fields"]
-	if !ok {
-		t.Fatal("schema is missing properties.fields")
-	}
+	if !ok { t.Fatal("schema is missing legacy properties.fields") }
 	if len(fieldSchema.Items.Enum) != len(supportedInfoFields) {
-		t.Fatalf("schema has %d fields, runtime supports %d", len(fieldSchema.Items.Enum), len(supportedInfoFields))
+		t.Fatalf("legacy schema has %d fields, runtime supports %d", len(fieldSchema.Items.Enum), len(supportedInfoFields))
 	}
 	schemaFields := append([]string(nil), fieldSchema.Items.Enum...)
 	runtimeFields := append([]string(nil), supportedInfoFields...)
-	sort.Strings(schemaFields)
-	sort.Strings(runtimeFields)
-	if !equalStrings(schemaFields, runtimeFields) {
-		t.Fatalf("schema field enum does not match runtime catalog:\nschema:  %#v\nruntime: %#v", schemaFields, runtimeFields)
-	}
+	sort.Strings(schemaFields); sort.Strings(runtimeFields)
+	if !equalStrings(schemaFields, runtimeFields) { t.Fatalf("legacy schema field enum does not match runtime catalog") }
 }
 
 func TestGenericFormatterHandlesAdditionalFastfetchShapes(t *testing.T) {

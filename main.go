@@ -1462,8 +1462,8 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 				symbol := "●"
 				if line.Symbol == "square" { symbol = "■" }
 				for n := 0; n < 16 && x < contentX+infoW; n++ {
-					put(canvas, x, y, symbol, fmt.Sprintf("\x1b[38;5;%dm", n), 2)
-					x += 2
+					put(canvas, x, y, symbol, fmt.Sprintf("\x1b[38;5;%dm", n), 1)
+					x++
 				}
 				y++
 				continue

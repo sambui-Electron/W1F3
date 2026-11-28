@@ -502,3 +502,90 @@ func TestGenericFormatterHandlesAdditionalFastfetchShapes(t *testing.T) {
 		t.Fatalf("generic map fallback lost scalar information: %q", fallback)
 	}
 }
+
+func TestPortedFastfetchYAMLPreservesOriginalProfile(t *testing.T) {
+	data, err := os.ReadFile("config.yaml")
+	if err != nil { t.Fatal(err) }
+	cfg, err := parseYAMLConfig(data, defaultConfig())
+	if err != nil { t.Fatal(err) }
+	if cfg.LogoFile != "C:/Users/PC/.config/fastfetch/ascii.txt" {
+		t.Fatalf("logo source changed: %q", cfg.LogoFile)
+	}
+	if cfg.Separator != " " { t.Fatalf("separator = %q, want one space", cfg.Separator) }
+	if cfg.LogoPaddingTop != 1 || cfg.LogoPaddingRight != 3 {
+		t.Fatalf("logo padding lost: top=%d right=%d", cfg.LogoPaddingTop, cfg.LogoPaddingRight)
+	}
+	if len(cfg.LogoPalette) != 9 || cfg.LogoPalette["7"] != "#94E2D5" || cfg.LogoPalette["9"] != "#74C7EC" {
+		t.Fatalf("logo palette changed: %#v", cfg.LogoPalette)
+	}
+	wantTypes := []string{"break","custom","host","cpu","gpu","memory","disk","custom","break","custom","os","kernel","bios","packages","shell","break","de","lm","wm","wmtheme","terminal","custom","break","custom","command","uptime","datetime","custom","colors"}
+	if len(cfg.Modules) != len(wantTypes) { t.Fatalf("module count = %d, want %d", len(cfg.Modules), len(wantTypes)) }
+	for i, want := range wantTypes {
+		if cfg.Modules[i].Type != want { t.Fatalf("module[%d] = %q, want %q", i, cfg.Modules[i].Type, want) }
+	}
+	if cfg.Modules[2].Key != "󰌢  PC" || cfg.Modules[2].KeyColor != "green" {
+		t.Fatalf("host presentation lost: %#v", cfg.Modules[2])
+	}
+	if cfg.Modules[24].Shell != "powershell" || !strings.Contains(cfg.Modules[24].Text, "Win32_OperatingSystem") {
+		t.Fatalf("OS age command was not ported for Windows: %#v", cfg.Modules[24])
+	}
+	if cfg.Modules[28].PaddingLeft != 18 || cfg.Modules[28].Symbol != "circle" {
+		t.Fatalf("terminal palette options lost: %#v", cfg.Modules[28])
+	}
+	if !cfg.Mouse || !cfg.AdaptiveScale || cfg.Speed != 0.45 {
+		t.Fatalf("omitted W1F3 settings should retain application defaults: %#v", cfg)
+	}
+}
+
+func TestLogoPaletteExpandsFastfetchColorSlots(t *testing.T) {
+	got := applyLogoPalette("A$1B$7C$9D", map[string]string{
+		"1":"#CDD6F4", "7":"#94E2D5", "9":"#74C7EC",
+	})
+	for _, expected := range []string{
+		"\x1b[38;2;205;214;244m",
+		"\x1b[38;2;148;226;213m",
+		"\x1b[38;2;116;199;236m",
+	} {
+		if !strings.Contains(got, expected) { t.Fatalf("missing %q in %q", expected, got) }
+	}
+}
+
+func TestConfiguredInfoPreservesFastfetchKeysAndColors(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Separator = " "
+	cfg.Modules = []ModuleConfig{
+		{Type:"custom", Format:"\x1b[90mHardware"},
+		{Type:"host", Key:"󰌢  PC", KeyColor:"green"},
+		{Type:"cpu", Key:"│ ├󰻠 ", KeyColor:"green"},
+		{Type:"break"},
+	}
+	mods := map[string]any{
+		"host": map[string]any{"name":"Workstation"},
+		"cpu": map[string]any{"cpu":"Test CPU"},
+	}
+	info := buildConfiguredInfo(mods, cfg, NativeInfo{})
+	if len(info) != 4 { t.Fatalf("got %d info rows: %#v", len(info), info) }
+	if info[0].Kind != "custom" || info[0].Value != "Hardware" || info[0].ValueColor != cDim {
+		t.Fatalf("custom section formatting lost: %#v", info[0])
+	}
+	if info[1].Label != "󰌢  PC" || info[1].LabelColor != "\x1b[32m" || info[1].Value != "Workstation" {
+		t.Fatalf("host module presentation lost: %#v", info[1])
+	}
+	if info[2].Label != "│ ├󰻠 " || info[2].Value != "Test CPU" {
+		t.Fatalf("CPU module presentation lost: %#v", info[2])
+	}
+	if info[3].Kind != "blank" { t.Fatalf("break module not preserved: %#v", info[3]) }
+}
+
+func TestYAMLParserRejectsUnsupportedModuleOptions(t *testing.T) {
+	_, err := parseYAMLConfig([]byte("modules:\n  - type: cpu\n    unknownOption: true\n"), defaultConfig())
+	if err == nil { t.Fatal("expected unsupported module option to be rejected") }
+}
+
+func TestYAMLParserHonorsExplicitFalseAndZeroValues(t *testing.T) {
+	cfg, err := parseYAMLConfig([]byte("mouse: false\nadaptive_scale: false\nspeed: 0\n"), defaultConfig())
+	if err != nil { t.Fatal(err) }
+	if cfg.Mouse || cfg.AdaptiveScale || cfg.Speed != 0 {
+		t.Fatalf("explicit false/zero values were not honored: %#v", cfg)
+	}
+}

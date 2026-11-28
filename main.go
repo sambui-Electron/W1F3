@@ -273,6 +273,15 @@ func parseAdvancedYAMLConfig(data []byte, base Config) (Config, error) {
 		t := strings.ToLower(strings.TrimSpace(m.Type))
 		if !allowedModules[t] { return cfg, fmt.Errorf("unsupported module type %q", m.Type) }
 	}
+	if cfg.Refresh < 0.2 { cfg.Refresh = 0.2 }
+	if cfg.Speed < 0 { cfg.Speed = 0 }
+	if cfg.Size < 0.2 { cfg.Size = 0.2 }
+	if cfg.Depth < 0.1 { cfg.Depth = 0.1 }
+	if cfg.Height < 0 { cfg.Height = 0 }
+	if cfg.AdaptiveStrength < 0 { cfg.AdaptiveStrength = 0 }
+	if cfg.AdaptiveMin < 1 { cfg.AdaptiveMin = 1 }
+	if cfg.AdaptiveMax < cfg.AdaptiveMin { cfg.AdaptiveMax = cfg.AdaptiveMin }
+	if cfg.AdaptiveMax > 1.5 { cfg.AdaptiveMax = 1.5 }
 	return cfg, nil
 }
 

@@ -411,84 +411,54 @@ func TestConfigRejectsUnknownAndDuplicateFields(t *testing.T) {
 
 func TestDefaultConfigAndSchemaExposeEverySupportedField(t *testing.T) {
 	configBytes, err := os.ReadFile("config.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(string(configBytes), "# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json\n") {
-		t.Fatal("config.yaml must link to the published JSON schema on its first line")
+	if err != nil { t.Fatal(err) }
+	firstLine := strings.SplitN(string(configBytes), "\n", 2)[0]
+	firstLine = strings.TrimSuffix(firstLine, "\r")
+	if firstLine != "# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json" {
+		t.Fatalf("config.yaml schema directive is incorrect: %q", firstLine)
 	}
 	cfg, err := parseYAMLConfig(configBytes, defaultConfig())
-	if err != nil {
-		t.Fatalf("stock config is invalid: %v", err)
-	}
-	if !equalStrings(cfg.Fields, defaultConfig().Fields) {
-		t.Fatalf("stock config fields differ from runtime defaults: %#v", cfg.Fields)
-	}
-	// Check the actual YAML list entries, including commented options. This
-	// avoids false positives such as matching "cpu" inside "cpuusage".
-	configCatalog := make(map[string]bool)
-	for _, line := range strings.Split(string(configBytes), "\n") {
-		line = strings.TrimSpace(line)
-		line = strings.TrimPrefix(line, "#")
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "- ") {
-			continue
-		}
-		field := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(line, "- "), "#", 2)[0])
-		if field == "" {
-			continue
-		}
-		if configCatalog[field] {
-			t.Errorf("field %q appears more than once in config.yaml", field)
-		}
-		configCatalog[field] = true
-	}
-	if len(configCatalog) != len(supportedInfoFields) {
-		t.Errorf("config.yaml catalog has %d fields, runtime supports %d", len(configCatalog), len(supportedInfoFields))
-	}
-	for _, field := range supportedInfoFields {
-		if !configCatalog[field] {
-			t.Errorf("default config should list %q as an active or commented selection", field)
-		}
-	}
-	for field := range configCatalog {
-		if !isSupportedInfoField(field) {
-			t.Errorf("config.yaml lists unsupported field %q", field)
-		}
-	}
+	if err != nil { t.Fatalf("ported config is invalid: %v", err) }
+	if len(cfg.Modules) != 29 { t.Fatalf("ported module sequence has %d entries, want 29", len(cfg.Modules)) }
+	wantFields := []string{"host","cpu","gpu","memory","disk","os","kernel","bios","packages","shell","de","lm","wm","wmtheme","terminal","uptime","datetime"}
+	if !equalStrings(cfg.Fields, wantFields) { t.Fatalf("active module fields differ from the source profile: %#v", cfg.Fields) }
 
 	var schema struct {
-		ID         string `json:"$id"`
-		Properties map[string]struct {
-			Items struct {
-				Enum []string `json:"enum"`
-			} `json:"items"`
-		} `json:"properties"`
+		ID string `json:"$id"`
+		Properties map[string]json.RawMessage `json:"properties"`
 	}
 	schemaBytes, err := os.ReadFile("config.schema.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(schemaBytes, &schema); err != nil {
-		t.Fatalf("invalid JSON schema: %v", err)
-	}
+	if err != nil { t.Fatal(err) }
+	if err := json.Unmarshal(schemaBytes, &schema); err != nil { t.Fatalf("invalid JSON schema: %v", err) }
 	const schemaURL = "https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json"
-	if schema.ID != schemaURL {
-		t.Fatalf("schema $id = %q, want %q", schema.ID, schemaURL)
-	}
-	fieldSchema, ok := schema.Properties["fields"]
-	if !ok {
-		t.Fatal("schema is missing properties.fields")
-	}
-	if len(fieldSchema.Items.Enum) != len(supportedInfoFields) {
-		t.Fatalf("schema has %d fields, runtime supports %d", len(fieldSchema.Items.Enum), len(supportedInfoFields))
-	}
-	schemaFields := append([]string(nil), fieldSchema.Items.Enum...)
+	if schema.ID != schemaURL { t.Fatalf("schema $id = %q, want %q", schema.ID, schemaURL) }
+
+	var fieldsProperty struct { Items struct { Enum []string `json:"enum"` } `json:"items"` }
+	if err := json.Unmarshal(schema.Properties["fields"], &fieldsProperty); err != nil { t.Fatal(err) }
+	schemaFields := append([]string(nil), fieldsProperty.Items.Enum...)
 	runtimeFields := append([]string(nil), supportedInfoFields...)
 	sort.Strings(schemaFields)
 	sort.Strings(runtimeFields)
 	if !equalStrings(schemaFields, runtimeFields) {
-		t.Fatalf("schema field enum does not match runtime catalog:\nschema:  %#v\nruntime: %#v", schemaFields, runtimeFields)
+		t.Fatalf("schema field enum does not match runtime catalog:\nschema: %#v\nruntime: %#v", schemaFields, runtimeFields)
+	}
+
+	var modulesProperty struct {
+		Items struct {
+			OneOf []struct {
+				Properties struct { Type struct { Enum []string `json:"enum"` } `json:"type"` } `json:"properties"`
+			} `json:"oneOf"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(schema.Properties["modules"], &modulesProperty); err != nil { t.Fatal(err) }
+	if len(modulesProperty.Items.OneOf) != 2 { t.Fatalf("module schema must support break and module objects") }
+	moduleEnums := append([]string(nil), modulesProperty.Items.OneOf[1].Properties.Type.Enum...)
+	wantModuleEnums := []string{"break","custom","command","colors"}
+	for _, field := range supportedInfoFields { if field != "colors" { wantModuleEnums = append(wantModuleEnums, field) } }
+	sort.Strings(moduleEnums)
+	sort.Strings(wantModuleEnums)
+	if !equalStrings(moduleEnums, wantModuleEnums) {
+		t.Fatalf("schema module types do not match runtime support:\nschema: %#v\nruntime: %#v", moduleEnums, wantModuleEnums)
 	}
 }
 
@@ -500,5 +470,92 @@ func TestGenericFormatterHandlesAdditionalFastfetchShapes(t *testing.T) {
 	fallback := generic(map[string]any{"driverInfo": "Adapter Driver", "firmwareRevision": "1.2.3"})
 	if fallback == "" || !strings.Contains(fallback, "Adapter Driver") {
 		t.Fatalf("generic map fallback lost scalar information: %q", fallback)
+	}
+}
+
+func TestPortedFastfetchYAMLPreservesOriginalProfile(t *testing.T) {
+	data, err := os.ReadFile("config.yaml")
+	if err != nil { t.Fatal(err) }
+	cfg, err := parseYAMLConfig(data, defaultConfig())
+	if err != nil { t.Fatal(err) }
+	if cfg.LogoFile != "C:/Users/PC/.config/fastfetch/ascii.txt" {
+		t.Fatalf("logo source changed: %q", cfg.LogoFile)
+	}
+	if cfg.Separator != " " { t.Fatalf("separator = %q, want one space", cfg.Separator) }
+	if cfg.LogoPaddingTop != 1 || cfg.LogoPaddingRight != 3 {
+		t.Fatalf("logo padding lost: top=%d right=%d", cfg.LogoPaddingTop, cfg.LogoPaddingRight)
+	}
+	if len(cfg.LogoPalette) != 9 || cfg.LogoPalette["7"] != "#94E2D5" || cfg.LogoPalette["9"] != "#74C7EC" {
+		t.Fatalf("logo palette changed: %#v", cfg.LogoPalette)
+	}
+	wantTypes := []string{"break","custom","host","cpu","gpu","memory","disk","custom","break","custom","os","kernel","bios","packages","shell","break","de","lm","wm","wmtheme","terminal","custom","break","custom","command","uptime","datetime","custom","colors"}
+	if len(cfg.Modules) != len(wantTypes) { t.Fatalf("module count = %d, want %d", len(cfg.Modules), len(wantTypes)) }
+	for i, want := range wantTypes {
+		if cfg.Modules[i].Type != want { t.Fatalf("module[%d] = %q, want %q", i, cfg.Modules[i].Type, want) }
+	}
+	if cfg.Modules[2].Key != "󰌢  PC" || cfg.Modules[2].KeyColor != "green" {
+		t.Fatalf("host presentation lost: %#v", cfg.Modules[2])
+	}
+	if cfg.Modules[24].Shell != "powershell" || !strings.Contains(cfg.Modules[24].Text, "Win32_OperatingSystem") {
+		t.Fatalf("OS age command was not ported for Windows: %#v", cfg.Modules[24])
+	}
+	if cfg.Modules[28].PaddingLeft != 18 || cfg.Modules[28].Symbol != "circle" {
+		t.Fatalf("terminal palette options lost: %#v", cfg.Modules[28])
+	}
+	if !cfg.Mouse || !cfg.AdaptiveScale || cfg.Speed != 0.45 {
+		t.Fatalf("omitted W1F3 settings should retain application defaults: %#v", cfg)
+	}
+}
+
+func TestLogoPaletteExpandsFastfetchColorSlots(t *testing.T) {
+	got := applyLogoPalette("A$1B$7C$9D", map[string]string{
+		"1":"#CDD6F4", "7":"#94E2D5", "9":"#74C7EC",
+	})
+	for _, expected := range []string{
+		"\x1b[38;2;205;214;244m",
+		"\x1b[38;2;148;226;213m",
+		"\x1b[38;2;116;199;236m",
+	} {
+		if !strings.Contains(got, expected) { t.Fatalf("missing %q in %q", expected, got) }
+	}
+}
+
+func TestConfiguredInfoPreservesFastfetchKeysAndColors(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Separator = " "
+	cfg.Modules = []ModuleConfig{
+		{Type:"custom", Format:"\x1b[90mHardware"},
+		{Type:"host", Key:"󰌢  PC", KeyColor:"green"},
+		{Type:"cpu", Key:"│ ├󰻠 ", KeyColor:"green"},
+		{Type:"break"},
+	}
+	mods := map[string]any{
+		"host": map[string]any{"name":"Workstation"},
+		"cpu": map[string]any{"cpu":"Test CPU"},
+	}
+	info := buildConfiguredInfo(mods, cfg, NativeInfo{})
+	if len(info) != 4 { t.Fatalf("got %d info rows: %#v", len(info), info) }
+	if info[0].Kind != "custom" || info[0].Value != "Hardware" || info[0].ValueColor != cDim {
+		t.Fatalf("custom section formatting lost: %#v", info[0])
+	}
+	if info[1].Label != "󰌢  PC" || info[1].LabelColor != "\x1b[32m" || info[1].Value != "Workstation" {
+		t.Fatalf("host module presentation lost: %#v", info[1])
+	}
+	if info[2].Label != "│ ├󰻠 " || info[2].Value != "Test CPU" {
+		t.Fatalf("CPU module presentation lost: %#v", info[2])
+	}
+	if info[3].Kind != "blank" { t.Fatalf("break module not preserved: %#v", info[3]) }
+}
+
+func TestYAMLParserRejectsUnsupportedModuleOptions(t *testing.T) {
+	_, err := parseYAMLConfig([]byte("modules:\n  - type: cpu\n    unknownOption: true\n"), defaultConfig())
+	if err == nil { t.Fatal("expected unsupported module option to be rejected") }
+}
+
+func TestYAMLParserHonorsExplicitFalseAndZeroValues(t *testing.T) {
+	cfg, err := parseYAMLConfig([]byte("mouse: false\nadaptive_scale: false\nspeed: 0\n"), defaultConfig())
+	if err != nil { t.Fatal(err) }
+	if cfg.Mouse || cfg.AdaptiveScale || cfg.Speed != 0 {
+		t.Fatalf("explicit false/zero values were not honored: %#v", cfg)
 	}
 }

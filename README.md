@@ -13,7 +13,7 @@ W1F3 is written in Go and targets Windows 10/11 x64. The primary executable and 
 - User configuration at `%USERPROFILE%\.config\fetch\config.yaml`.
 - First-run default configuration downloaded from this repository's `main/config.yaml` on GitHub.
 - Linked JSON Schema for YAML editor validation and completion.
-- Configurable information catalog with 70 selectable fields: 66 queried from Fastfetch plus four Windows-native W1F3 fields (`disk`, `kernel`, `shell`, and `uptime`). The catalog follows Fastfetch 2.71.0 and omits six presentation/command modules that W1F3 handles itself or cannot configure (`logo`, `title`, `separator`, `break`, `command`, and `custom`).
+- Ordered Fastfetch-style YAML modules with per-module labels and colors, custom section rows, PowerShell command modules, blank-line breaks, and terminal color swatches. The information catalog supports 70 field names: 65 queried from Fastfetch, four collected natively by W1F3 (`disk`, `kernel`, `shell`, and `uptime`), and `colors` rendered natively. Logo and separator settings are also handled directly by W1F3.
 - Cached logos stored under `%USERPROFILE%\.config\fetch\logos\`.
 - `W1F3 -v` / `W1F3 --version` reports the installed version. `fetch` remains available as a backward-compatible alias.
 
@@ -72,11 +72,22 @@ Schema:
 
 The first line of `config.yaml` contains a YAML Language Server directive pointing to the matching schema in this repository. The installer also copies the matching schema beside the local config for local tooling, and refreshes that copy on upgrade. When upgrading an older config, the installer repairs only the schema-reference comment; it preserves all configuration values and field selections.
 
-### Selecting information fields
+### Ordered Fastfetch-style modules
 
-`fields` is an ordered list. The stock config enables a compact set of 15 fields and includes the remaining supported options as commented entries grouped by category. Uncomment a field to show it; comment or remove an active entry to hide it; reorder entries to change display order. The schema validates all 70 supported information fields and provides editor completion. Four entries (`disk`, `kernel`, `shell`, and `uptime`) are collected by W1F3 itself; the other 66 map to Fastfetch modules.
+The `modules` list is rendered in the exact order written in YAML. It supports:
 
-W1F3 requests only the selected Fastfetch modules, rather than querying a hard-coded subset. Windows-native implementations are used for `disk`, `kernel`, `shell`, and `uptime`. Other modules are collected from Fastfetch and formatted into the information panel. Fastfetch implements 69 of its 76 modules on Windows in the 2.71.0 source; an available module can still produce no line when the device, OS, drivers, permissions, or installed Fastfetch build do not provide a result. `publicip` and `weather` are optional network-backed modules; keep them commented unless you explicitly want those lookups.
+- A scalar `break` entry for a blank line.
+- Information modules such as `host`, `cpu`, `gpu`, `memory`, `disk`, `os`, `kernel`, `bios`, `packages`, `shell`, `de`, `lm`, `wm`, `wmtheme`, `terminal`, `uptime`, and `datetime`.
+- `key` and `keyColor` for the module label and its color.
+- `custom` modules for section headings and separators.
+- `command` modules for locally executed commands. Supported shells are PowerShell, PowerShell 7 (`pwsh`), and `cmd`. Commands have a three-second timeout and their output is cached for 60 seconds. Only use commands from configuration files you trust.
+- `colors` for the 16 terminal-color swatches, with `paddingLeft` and `symbol` options.
+
+The `display.separator` value is inserted between each module key and its value. The `logo` mapping supports a custom file source, numbered `$1`–`$9` true-color replacements, and top/right padding. W1F3 also retains its own flat animation settings (`refresh`, `speed`, `size`, `depth`, `spin`, `height`, adaptive scaling, mouse, color, info visibility, and box).
+
+The supplied profile's OS-age command was ported to PowerShell and calculates the number of days since the Windows installation date. Its logo source is still the original machine-specific path; update `logo.source` if the file is stored elsewhere.
+
+For simpler configurations, the legacy `fields` list and flat `logo_file` settings remain supported. The schema validates module names and options and provides YAML editor completion. W1F3 collects `disk`, `kernel`, `shell`, and `uptime` natively; other information modules are queried from Fastfetch. Modules that have no result on the current machine are omitted. Network-backed Fastfetch modules may perform network lookups.
 
 ## Logo cache
 

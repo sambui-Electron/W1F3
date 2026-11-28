@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"context"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -16,8 +16,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
+
+	"gopkg.in/yaml.v3"
 )
 
 const version = "0.5.2"
@@ -57,6 +60,17 @@ const (
 	cDim   = "\x1b[38;5;240m"
 )
 
+type ModuleConfig struct {
+	Type         string `yaml:"type"`
+	Key          string `yaml:"key"`
+	KeyColor     string `yaml:"keyColor"`
+	Format       string `yaml:"format"`
+	Text         string `yaml:"text"`
+	Shell        string `yaml:"shell"`
+	PaddingLeft  int    `yaml:"paddingLeft"`
+	Symbol       string `yaml:"symbol"`
+}
+
 type Config struct {
 	Logo             string
 	LogoFile         string
@@ -76,13 +90,16 @@ type Config struct {
 	ShowInfo         bool
 	Box              bool
 	Fields           []string
+	Modules          []ModuleConfig
+	Separator        string
+	LogoPalette      map[string]string
+	LogoPaddingTop   int
+	LogoPaddingRight int
 }
 
-// supportedInfoFields mirrors the current Fastfetch information modules W1F3
-// exposes, plus the Windows-native fields rendered by W1F3 itself. W1F3-owned
-// presentation modules (logo, title, separator, break) and option-driven modules
-// (command, custom) are excluded because W1F3 owns its layout and does not expose
-// Fastfetch's per-module configuration language.
+// supportedInfoFields lists the information modules W1F3 can display.
+// Presentation modules (break, custom, command, colors) are parsed separately
+// and rendered directly by W1F3 rather than requested from Fastfetch.
 var supportedInfoFields = []string{
 	"battery", "bios", "bluetooth", "bluetoothradio", "board", "bootmgr",
 	"brightness", "btrfs", "camera", "chassis", "codec", "cpu", "cpucache", "cpuusage",
@@ -97,7 +114,7 @@ var supportedInfoFields = []string{
 }
 
 var nativeInfoFields = map[string]bool{
-	"disk": true, "kernel": true, "shell": true, "uptime": true,
+	"disk": true, "kernel": true, "shell": true, "uptime": true, "colors": true,
 }
 
 func isSupportedInfoField(field string) bool {
@@ -131,7 +148,7 @@ func defaultConfig() Config {
 	return Config{
 		Logo: "Windows 11", Refresh: 1.0, Speed: 0.45, Size: 1.0,
 		Depth: 1.0, Spin: "xy", Height: 32, AdaptiveScale: true, AdaptiveStrength: 0.65, AdaptiveMin: 1.0, AdaptiveMax: 1.5, Mouse: true,
-		Color: true, ShowInfo: true, Box: false,
+		Color: true, ShowInfo: true, Box: false, Separator: ": ",
 		Fields: []string{"os", "kernel", "uptime", "shell", "display", "terminal", "cpu", "gpu", "memory", "disk", "host", "packages", "bios", "board", "locale"},
 	}
 }
@@ -146,148 +163,175 @@ func configRoot() string {
 
 func configPath() string { return filepath.Join(configRoot(), "config.yaml") }
 
-// parseYAMLConfig intentionally supports the scalar/list subset used by Fetch's
-// config. It keeps the executable dependency-free while accepting ordinary YAML
-// comments, quoted values, booleans, numbers and block lists.
+// yamlDocument is the typed top-level W1F3 YAML contract. Nested module and logo
+// nodes are validated explicitly so unsupported Fastfetch options fail clearly.
+type yamlDocument struct {
+	Logo             yaml.Node `yaml:"logo"`
+	LogoFile         string    `yaml:"logo_file"`
+	FastfetchPath    string    `yaml:"fastfetch_path"`
+	Refresh          *float64  `yaml:"refresh"`
+	Speed            *float64  `yaml:"speed"`
+	Size             *float64  `yaml:"size"`
+	Depth            *float64  `yaml:"depth"`
+	Spin             string    `yaml:"spin"`
+	Height           *int      `yaml:"height"`
+	AdaptiveScale    *bool     `yaml:"adaptive_scale"`
+	AdaptiveStrength *float64  `yaml:"adaptive_strength"`
+	AdaptiveMin      *float64  `yaml:"adaptive_min"`
+	AdaptiveMax      *float64  `yaml:"adaptive_max"`
+	Mouse            *bool     `yaml:"mouse"`
+	Color            *bool     `yaml:"color"`
+	ShowInfo         *bool     `yaml:"show_info"`
+	Box              *bool     `yaml:"box"`
+	Fields           []string  `yaml:"fields"`
+	Modules          []yaml.Node `yaml:"modules"`
+	Display          struct { Separator string `yaml:"separator"` } `yaml:"display"`
+	Separator        string    `yaml:"separator"`
+	LogoPalette      map[string]string `yaml:"logo_palette"`
+	LogoPadding      struct {
+		Top int `yaml:"top"`
+		Right int `yaml:"right"`
+	} `yaml:"logo_padding"`
+}
+
 func parseYAMLConfig(data []byte, base Config) (Config, error) {
 	cfg := base
-	section := ""
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := strings.TrimRight(scanner.Text(), " \t\r")
-		trim := strings.TrimSpace(line)
-		if trim == "" || strings.HasPrefix(trim, "#") || trim == "---" || trim == "..." {
-			continue
-		}
-		if strings.HasPrefix(trim, "- ") {
-			if section != "fields" {
-				return cfg, fmt.Errorf("config line %d: list item outside fields", lineNo)
+	var doc yamlDocument
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&doc); err != nil {
+		return cfg, fmt.Errorf("parse YAML config: %w", err)
+	}
+	cfg.LogoFile = doc.LogoFile
+	cfg.Fastfetch = doc.FastfetchPath
+	if doc.Refresh != nil { cfg.Refresh = *doc.Refresh }
+	if doc.Speed != nil { cfg.Speed = *doc.Speed }
+	if doc.Size != nil { cfg.Size = *doc.Size }
+	if doc.Depth != nil { cfg.Depth = *doc.Depth }
+	if doc.Spin != "" { cfg.Spin = strings.ToLower(doc.Spin) }
+	if doc.Height != nil { cfg.Height = *doc.Height }
+	if doc.AdaptiveScale != nil { cfg.AdaptiveScale = *doc.AdaptiveScale }
+	if doc.AdaptiveStrength != nil { cfg.AdaptiveStrength = *doc.AdaptiveStrength }
+	if doc.AdaptiveMin != nil { cfg.AdaptiveMin = *doc.AdaptiveMin }
+	if doc.AdaptiveMax != nil { cfg.AdaptiveMax = *doc.AdaptiveMax }
+	if doc.Mouse != nil { cfg.Mouse = *doc.Mouse }
+	if doc.Color != nil { cfg.Color = *doc.Color }
+	if doc.ShowInfo != nil { cfg.ShowInfo = *doc.ShowInfo }
+	if doc.Box != nil { cfg.Box = *doc.Box }
+	if doc.Separator != "" { cfg.Separator = doc.Separator }
+	if doc.Display.Separator != "" { cfg.Separator = doc.Display.Separator }
+	if doc.Logo.Kind != 0 {
+		switch doc.Logo.Kind {
+		case yaml.ScalarNode:
+			cfg.Logo = doc.Logo.Value
+		case yaml.MappingNode:
+			var logo struct {
+				Type string `yaml:"type"`
+				Source string `yaml:"source"`
+				Color map[string]string `yaml:"color"`
+				Padding struct { Top int `yaml:"top"`; Right int `yaml:"right"` } `yaml:"padding"`
 			}
-			v := unquoteYAML(stripYAMLComment(strings.TrimSpace(strings.TrimPrefix(trim, "- "))))
-			if v != "" {
-				cfg.Fields = append(cfg.Fields, strings.ToLower(v))
-			}
-			continue
-		}
-		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
-			return cfg, fmt.Errorf("config line %d: unsupported nested YAML value", lineNo)
-		}
-		pair := strings.SplitN(trim, ":", 2)
-		if len(pair) != 2 {
-			return cfg, fmt.Errorf("config line %d: expected key: value", lineNo)
-		}
-		key := strings.ToLower(strings.TrimSpace(pair[0]))
-		raw := strings.TrimSpace(stripYAMLComment(strings.TrimSpace(pair[1])))
-		if raw == "" {
-			if key == "fields" {
-				cfg.Fields = nil
-				section = "fields"
-				continue
-			}
-			return cfg, fmt.Errorf("config line %d: empty value for %s", lineNo, key)
-		}
-		section = ""
-		value := unquoteYAML(raw)
-		parseFloat := func() (float64, error) { return strconv.ParseFloat(value, 64) }
-		parseBool := func() (bool, error) { return strconv.ParseBool(strings.ToLower(value)) }
-		parseInt := func() (int, error) { n, e := strconv.Atoi(value); return n, e }
-		var err error
-		switch key {
-		case "logo":
-			cfg.Logo = value
-		case "logo_file":
-			cfg.LogoFile = value
-		case "fastfetch_path":
-			cfg.Fastfetch = value
-		case "refresh":
-			cfg.Refresh, err = parseFloat()
-		case "speed":
-			cfg.Speed, err = parseFloat()
-		case "size":
-			cfg.Size, err = parseFloat()
-		case "depth":
-			cfg.Depth, err = parseFloat()
-		case "spin":
-			cfg.Spin = strings.ToLower(value)
-		case "height":
-			cfg.Height, err = parseInt()
-		case "adaptive_scale":
-			cfg.AdaptiveScale, err = parseBool()
-		case "adaptive_strength":
-			cfg.AdaptiveStrength, err = parseFloat()
-		case "adaptive_min":
-			cfg.AdaptiveMin, err = parseFloat()
-		case "adaptive_max":
-			cfg.AdaptiveMax, err = parseFloat()
-		case "mouse":
-			cfg.Mouse, err = parseBool()
-		case "color":
-			cfg.Color, err = parseBool()
-		case "show_info":
-			cfg.ShowInfo, err = parseBool()
-		case "box":
-			cfg.Box, err = parseBool()
-		case "fields":
-			cfg.Fields = nil
-			for _, item := range strings.Split(value, ",") {
-				item = strings.TrimSpace(item)
-				if item != "" {
-					cfg.Fields = append(cfg.Fields, strings.ToLower(unquoteYAML(item)))
+			for j := 0; j < len(doc.Logo.Content); j += 2 {
+				key := doc.Logo.Content[j].Value
+				if key != "type" && key != "source" && key != "color" && key != "padding" {
+					return cfg, fmt.Errorf("logo: unknown property %q", key)
 				}
 			}
+			if err := doc.Logo.Decode(&logo); err != nil { return cfg, fmt.Errorf("logo: %w", err) }
+			if logo.Type != "file" { return cfg, fmt.Errorf("unsupported logo type %q; expected file", logo.Type) }
+			if strings.TrimSpace(logo.Source) == "" { return cfg, errors.New("logo.source is required when logo.type is file") }
+			if logo.Padding.Top < 0 || logo.Padding.Right < 0 { return cfg, errors.New("logo padding cannot be negative") }
+			if len(doc.Logo.Content) > 0 {
+				for j := 0; j < len(doc.Logo.Content); j += 2 {
+					if doc.Logo.Content[j].Value == "padding" {
+						paddingNode := doc.Logo.Content[j+1]
+						for k := 0; k < len(paddingNode.Content); k += 2 {
+							name := paddingNode.Content[k].Value
+							if name != "top" && name != "right" { return cfg, fmt.Errorf("logo.padding: unknown property %q", name) }
+						}
+					}
+				}
+			}
+			cfg.LogoFile = logo.Source
+			cfg.LogoPalette = logo.Color
+			cfg.LogoPaddingTop, cfg.LogoPaddingRight = logo.Padding.Top, logo.Padding.Right
 		default:
-			return cfg, fmt.Errorf("config line %d: unknown key %q", lineNo, key)
-		}
-		if err != nil {
-			return cfg, fmt.Errorf("config line %d (%s): %w", lineNo, key, err)
+			return cfg, errors.New("logo must be a string or mapping")
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return cfg, err
+	if len(doc.LogoPalette) > 0 { cfg.LogoPalette = doc.LogoPalette }
+	if doc.LogoPadding.Top < 0 || doc.LogoPadding.Right < 0 { return cfg, errors.New("logo_padding values cannot be negative") }
+	if doc.LogoPadding.Top != 0 { cfg.LogoPaddingTop = doc.LogoPadding.Top }
+	if doc.LogoPadding.Right != 0 { cfg.LogoPaddingRight = doc.LogoPadding.Right }
+	if len(doc.Modules) > 0 {
+		cfg.Modules = nil
+		cfg.Fields = nil
+		for i, node := range doc.Modules {
+			module := ModuleConfig{}
+			if node.Kind == yaml.ScalarNode {
+				module.Type = strings.ToLower(strings.TrimSpace(node.Value))
+			} else if node.Kind == yaml.MappingNode {
+				for j := 0; j < len(node.Content); j += 2 {
+					key := node.Content[j].Value
+					switch key {
+					case "type", "key", "keyColor", "format", "text", "shell", "paddingLeft", "symbol":
+					default: return cfg, fmt.Errorf("modules[%d]: unknown property %q", i, key)
+					}
+				}
+				if err := node.Decode(&module); err != nil { return cfg, fmt.Errorf("modules[%d]: %w", i, err) }
+			} else {
+				return cfg, fmt.Errorf("modules[%d] must be a string or mapping", i)
+			}
+			module.Type = strings.ToLower(strings.TrimSpace(module.Type))
+			if module.Type == "" { return cfg, fmt.Errorf("modules[%d]: missing type", i) }
+			if module.PaddingLeft < 0 { return cfg, fmt.Errorf("modules[%d]: paddingLeft cannot be negative", i) }
+			if module.KeyColor != "" {
+				switch strings.ToLower(module.KeyColor) {
+				case "gray", "grey", "green", "yellow", "blue", "magenta", "cyan", "red", "white":
+				default: return cfg, fmt.Errorf("modules[%d]: unsupported keyColor %q", i, module.KeyColor)
+				}
+			}
+			switch module.Type {
+			case "break", "custom", "command", "colors":
+				if module.Type == "custom" && module.Format == "" { return cfg, fmt.Errorf("modules[%d]: custom module requires format", i) }
+				if module.Type == "command" {
+					if module.Text == "" { return cfg, fmt.Errorf("modules[%d]: command module requires text", i) }
+					if module.Shell == "" { module.Shell = "powershell" }
+					if module.Shell != "powershell" && module.Shell != "pwsh" && module.Shell != "cmd" { return cfg, fmt.Errorf("modules[%d]: unsupported command shell %q", i, module.Shell) }
+				}
+				if module.Type == "colors" && module.Symbol != "" && module.Symbol != "circle" && module.Symbol != "square" { return cfg, fmt.Errorf("modules[%d]: symbol must be circle or square", i) }
+			default:
+				if !isSupportedInfoField(module.Type) { return cfg, fmt.Errorf("modules[%d]: unsupported module type %q", i, module.Type) }
+				cfg.Fields = append(cfg.Fields, module.Type)
+			}
+			cfg.Modules = append(cfg.Modules, module)
+		}
+	} else if doc.Fields != nil {
+		cfg.Fields = make([]string, 0, len(doc.Fields))
+		for _, field := range doc.Fields { cfg.Fields = append(cfg.Fields, strings.ToLower(strings.TrimSpace(field))) }
 	}
-	seenFields := make(map[string]bool, len(cfg.Fields))
+	for key, color := range cfg.LogoPalette {
+		if len(key) != 1 || key[0] < '1' || key[0] > '9' || len(color) != 7 || color[0] != '#' {
+			return cfg, fmt.Errorf("invalid logo color slot %q: expected slots 1-9 and #RRGGBB values", key)
+		}
+		if _, err := strconv.ParseUint(color[1:], 16, 32); err != nil { return cfg, fmt.Errorf("invalid logo color for slot %s: %w", key, err) }
+	}
+	seen := make(map[string]bool, len(cfg.Fields))
 	for _, field := range cfg.Fields {
-		field = strings.ToLower(strings.TrimSpace(field))
-		if !isSupportedInfoField(field) {
-			return cfg, fmt.Errorf("unsupported information field %q; see config.schema.json for available fields", field)
-		}
-		if seenFields[field] {
-			return cfg, fmt.Errorf("duplicate information field %q", field)
-		}
-		seenFields[field] = true
+		if !isSupportedInfoField(field) { return cfg, fmt.Errorf("unsupported information field %q; see config.schema.json for available fields", field) }
+		if len(cfg.Modules) == 0 && seen[field] { return cfg, fmt.Errorf("duplicate information field %q", field) }
+		seen[field] = true
 	}
-	if len(cfg.Fields) == 0 {
-		cfg.Fields = []string{}
-	}
-	if cfg.Refresh < 0.2 {
-		cfg.Refresh = 0.2
-	}
-	if cfg.Speed < 0 {
-		cfg.Speed = 0
-	}
-	if cfg.Size < 0.2 {
-		cfg.Size = 0.2
-	}
-	if cfg.Depth < 0.1 {
-		cfg.Depth = 0.1
-	}
-	if cfg.Height < 0 {
-		cfg.Height = 0
-	}
-	if cfg.AdaptiveStrength < 0 {
-		cfg.AdaptiveStrength = 0
-	}
-	if cfg.AdaptiveMin < 1.0 {
-		cfg.AdaptiveMin = 1.0
-	}
-	if cfg.AdaptiveMax < cfg.AdaptiveMin {
-		cfg.AdaptiveMax = cfg.AdaptiveMin
-	}
-	if cfg.AdaptiveMax > 1.5 {
-		cfg.AdaptiveMax = 1.5
-	}
+	if cfg.Refresh < 0.2 { cfg.Refresh = 0.2 }
+	if cfg.Speed < 0 { cfg.Speed = 0 }
+	if cfg.Size < 0.2 { cfg.Size = 0.2 }
+	if cfg.Depth < 0.1 { cfg.Depth = 0.1 }
+	if cfg.Height < 0 { cfg.Height = 0 }
+	if cfg.AdaptiveStrength < 0 { cfg.AdaptiveStrength = 0 }
+	if cfg.AdaptiveStrength > 1 { cfg.AdaptiveStrength = 1 }
+	if cfg.AdaptiveMin < 1 { cfg.AdaptiveMin = 1 }
+	if cfg.AdaptiveMax < cfg.AdaptiveMin { cfg.AdaptiveMax = cfg.AdaptiveMin }
+	if cfg.AdaptiveMax > 1.5 { cfg.AdaptiveMax = 1.5 }
 	return cfg, nil
 }
 
@@ -1075,6 +1119,12 @@ func clip(s string, width int) string {
 type InfoLine struct {
 	Label, Value string
 	Lines        []string
+	Kind         string
+	LabelColor   string
+	ValueColor   string
+	Separator    string
+	PaddingLeft  int
+	Symbol       string
 }
 
 func buildInfo(mods map[string]any, fields []string, native NativeInfo) []InfoLine {
@@ -1128,6 +1178,142 @@ func buildInfo(mods map[string]any, fields []string, native NativeInfo) []InfoLi
 		}
 	}
 	return result
+}
+
+func buildConfiguredInfo(mods map[string]any, cfg Config, native NativeInfo) []InfoLine {
+	if len(cfg.Modules) == 0 { return buildInfo(mods, cfg.Fields, native) }
+	result := make([]InfoLine, 0, len(cfg.Modules))
+	for _, module := range cfg.Modules {
+		switch module.Type {
+		case "break":
+			result = append(result, InfoLine{Kind: "blank"})
+		case "custom":
+			text, color := stripInfoANSI(module.Format)
+			result = append(result, InfoLine{Kind: "custom", Value: text, ValueColor: color, PaddingLeft: module.PaddingLeft})
+		case "colors":
+			result = append(result, InfoLine{Kind: "palette", PaddingLeft: module.PaddingLeft, Symbol: module.Symbol})
+		case "command":
+			value, err := runConfiguredCommand(module.Shell, module.Text)
+			if err != nil || strings.TrimSpace(value) == "" { continue }
+			label := module.Key
+			if label == "" { label = "Command" }
+			result = append(result, InfoLine{Label: label, Value: strings.TrimSpace(value), LabelColor: moduleKeyColor(module.KeyColor), ValueColor: cWhite, Separator: cfg.Separator})
+		default:
+			lines := buildInfo(mods, []string{module.Type}, native)
+			if len(lines) == 0 { continue }
+			line := lines[0]
+			if module.Key != "" { line.Label = module.Key }
+			line.LabelColor = moduleKeyColor(module.KeyColor)
+			line.ValueColor = cWhite
+			line.Separator = cfg.Separator
+			result = append(result, line)
+		}
+	}
+	return result
+}
+
+func moduleKeyColor(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "gray", "grey": return cDim
+	case "green": return "\x1b[32m"
+	case "yellow": return "\x1b[33m"
+	case "blue": return "\x1b[34m"
+	case "magenta": return "\x1b[35m"
+	case "cyan": return "\x1b[36m"
+	case "red": return "\x1b[31m"
+	case "white": return cWhite
+	default: return cCyan
+	}
+}
+
+func stripInfoANSI(input string) (string, string) {
+	color := cWhite
+	var out strings.Builder
+	for i := 0; i < len(input); {
+		if input[i] == 0x1b && i+1 < len(input) && input[i+1] == '[' {
+			end := strings.IndexByte(input[i+2:], 'm')
+			if end >= 0 {
+				seq := input[i+2:i+2+end]
+				if seq == "90" || strings.HasPrefix(seq, "90;") { color = cDim }
+				if seq == "0" { color = cWhite }
+				i += end + 3
+				continue
+			}
+		}
+		out.WriteByte(input[i])
+		i++
+	}
+	return out.String(), color
+}
+
+type commandCacheEntry struct {
+	value string
+	at time.Time
+}
+
+var commandCacheState = struct {
+	sync.Mutex
+	entries map[string]commandCacheEntry
+}{entries: make(map[string]commandCacheEntry)}
+
+func runConfiguredCommand(shell, command string) (string, error) {
+	cacheKey := shell + "\x00" + command
+	commandCacheState.Lock()
+	if entry, ok := commandCacheState.entries[cacheKey]; ok && time.Since(entry.at) < time.Minute {
+		commandCacheState.Unlock()
+		return entry.value, nil
+	}
+	commandCacheState.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var cmd *exec.Cmd
+	switch strings.ToLower(shell) {
+	case "powershell":
+		name := "powershell.exe"
+		if _, err := exec.LookPath(name); err != nil { name = "pwsh" }
+		cmd = exec.CommandContext(ctx, name, "-NoProfile", "-NonInteractive", "-Command", command)
+	case "pwsh":
+		cmd = exec.CommandContext(ctx, "pwsh", "-NoProfile", "-NonInteractive", "-Command", command)
+	case "cmd":
+		cmd = exec.CommandContext(ctx, "cmd.exe", "/C", command)
+	default:
+		return "", fmt.Errorf("unsupported command shell %q", shell)
+	}
+	out, err := cmd.Output()
+	if err != nil { return "", fmt.Errorf("configured command failed: %w", err) }
+	value := strings.TrimSpace(string(out))
+	commandCacheState.Lock()
+	commandCacheState.entries[cacheKey] = commandCacheEntry{value: value, at: time.Now()}
+	commandCacheState.Unlock()
+	return value, nil
+}
+
+func applyLogoPalette(data string, palette map[string]string) string {
+	for slot, hex := range palette {
+		if len(hex) != 7 || hex[0] != '#' { continue }
+		rgb, err := strconv.ParseUint(hex[1:], 16, 32)
+		if err != nil { continue }
+		sequence := fmt.Sprintf("\x1b[38;2;%d;%d;%dm", (rgb>>16)&255, (rgb>>8)&255, rgb&255)
+		data = strings.ReplaceAll(data, "$"+slot, sequence)
+	}
+	return data
+}
+
+func displayWidth(value string) int {
+	width := 0
+	for _, r := range value {
+		if isWide(r) { width += 2 } else { width++ }
+	}
+	return width
+}
+
+func computeLayoutForConfig(cols, rows int, cfg Config) Layout {
+	layout := computeLayout(cols, rows, cfg.ShowInfo)
+	if cfg.ShowInfo && cfg.LogoPaddingRight > 0 {
+		layout.InfoX += cfg.LogoPaddingRight
+		layout.InfoW = maxInt(0, layout.InfoW-cfg.LogoPaddingRight)
+	}
+	return layout
 }
 
 func titleCase(s string) string {
@@ -1205,11 +1391,12 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 			canvas[y][x] = Pixel{' ', "", math.Inf(-1)}
 		}
 	}
-	layout := computeLayout(cols, rows, cfg.ShowInfo)
+	layout := computeLayoutForConfig(cols, rows, cfg)
 	logoBounds := layout.Logo
 	if len(logo) > 0 {
 		logoWidth := len(logo[0])
 		logoBounds = centeredContentRect(layout.Logo, logoWidth, len(logo))
+		logoBounds.Y += cfg.LogoPaddingTop
 		for y, row := range logo {
 			yy := logoBounds.Y + y
 			if yy < layout.Logo.Y || yy >= layout.Logo.Y+layout.Logo.H || yy < 0 || yy >= rows {
@@ -1228,8 +1415,10 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 		contentX := layout.InfoX
 		contentRows := 0
 		for _, line := range info {
-			if len(line.Lines) > 0 {
-				contentRows += 1 + len(line.Lines)
+			if line.Kind == "blank" || line.Kind == "custom" || line.Kind == "palette" {
+				contentRows++
+			} else if len(line.Lines) > 0 {
+				if line.Separator != "" { contentRows += len(line.Lines) } else { contentRows += 1 + len(line.Lines) }
 			} else {
 				contentRows++
 			}
@@ -1259,27 +1448,66 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 		put(canvas, contentX, startY, clip(userHost, infoW), "\x1b[1;38;5;81m", infoW)
 		put(canvas, contentX, startY+1, strings.Repeat("─", minInt(infoW, maxInt(12, len(userHost)))), cDim, infoW)
 		y := startY + 2
-		keyW := minInt(11, maxInt(5, infoW/4))
-		valueW := infoW - keyW - 2
 		for _, line := range info {
-			if y >= rows {
-				break
+			if y >= rows { break }
+			if line.Kind == "blank" { y++; continue }
+			if line.Kind == "custom" {
+				x := contentX + line.PaddingLeft
+				put(canvas, x, y, clip(line.Value, infoW-line.PaddingLeft), line.ValueColor, infoW-line.PaddingLeft)
+				y++
+				continue
+			}
+			if line.Kind == "palette" {
+				x := contentX + line.PaddingLeft
+				symbol := "●"
+				if line.Symbol == "square" { symbol = "■" }
+				for n := 0; n < 16 && x < contentX+infoW; n++ {
+					put(canvas, x, y, symbol, fmt.Sprintf("\x1b[38;5;%dm", n), 1)
+					x++
+				}
+				y++
+				continue
 			}
 			if len(line.Lines) > 0 {
-				put(canvas, contentX, y, clip(line.Label+":", infoW), cCyan, infoW)
-				y++
-				for _, item := range line.Lines {
-					if y >= rows {
-						break
-					}
-					put(canvas, contentX+4, y, clip(item, infoW-4), cWhite, infoW-4)
+				labelColor := line.LabelColor
+				if labelColor == "" { labelColor = cCyan }
+				if line.Separator != "" {
+					label := clip(line.Label, infoW)
+					labelWidth := displayWidth(label)
+					put(canvas, contentX, y, label, labelColor, infoW)
+					put(canvas, contentX+labelWidth, y, line.Separator, cDim, displayWidth(line.Separator))
+					valueX := contentX + labelWidth + displayWidth(line.Separator)
+					put(canvas, valueX, y, clip(line.Lines[0], infoW-(valueX-contentX)), cWhite, infoW-(valueX-contentX))
 					y++
+					for _, item := range line.Lines[1:] {
+						if y >= rows { break }
+						put(canvas, contentX+4, y, clip(item, infoW-4), cWhite, infoW-4)
+						y++
+					}
+				} else {
+					put(canvas, contentX, y, clip(line.Label+":", infoW), labelColor, infoW)
+					y++
+					for _, item := range line.Lines {
+						if y >= rows { break }
+						put(canvas, contentX+4, y, clip(item, infoW-4), cWhite, infoW-4)
+						y++
+					}
 				}
 				continue
 			}
-			put(canvas, contentX, y, clip(line.Label, keyW), cCyan, keyW)
-			put(canvas, contentX+keyW, y, ": ", cDim, 2)
-			put(canvas, contentX+keyW+2, y, clip(line.Value, valueW), cWhite, valueW)
+			labelColor := line.LabelColor
+			if labelColor == "" { labelColor = cCyan }
+			valueColor := line.ValueColor
+			if valueColor == "" { valueColor = cWhite }
+			separator := line.Separator
+			if separator == "" { separator = cfg.Separator }
+			if separator == "" { separator = ": " }
+			label := clip(line.Label, infoW)
+			labelWidth := displayWidth(label)
+			put(canvas, contentX, y, label, labelColor, infoW)
+			put(canvas, contentX+labelWidth, y, separator, cDim, displayWidth(separator))
+			valueX := contentX + labelWidth + displayWidth(separator)
+			put(canvas, valueX, y, clip(line.Value, infoW-(valueX-contentX)), valueColor, infoW-(valueX-contentX))
 			y++
 		}
 	}
@@ -1367,6 +1595,7 @@ func main() {
 	}
 	if logoArg != "" {
 		cfg.Logo = logoArg
+		cfg.LogoFile = ""
 	}
 	if logoFileArg != "" {
 		cfg.LogoFile = logoFileArg
@@ -1435,7 +1664,7 @@ func main() {
 				time.Sleep(300 * time.Millisecond)
 			}
 			native := readNativeInfo()
-			info = buildInfo(mods, cfg.Fields, native)
+			info = buildConfiguredInfo(mods, cfg, native)
 			lastRefresh = now
 		}
 		cols, rows := terminalSize()
@@ -1445,7 +1674,7 @@ func main() {
 		if cols < 32 {
 			cols = 32
 		}
-		layout := computeLayout(cols, rows, cfg.ShowInfo)
+		layout := computeLayoutForConfig(cols, rows, cfg)
 		viewportW := maxInt(8, layout.Logo.W)
 		viewportH := effectiveLogoViewportHeight(maxInt(6, layout.Logo.H), cfg)
 		angleX, angleY := ax, ay
@@ -1509,7 +1738,7 @@ func loadLogo(ff string, cfg Config, configFile string) ([][]LogoCell, error) {
 		if e != nil {
 			return nil, e
 		}
-		return parseLogo(string(b)), nil
+		return parseLogo(applyLogoPalette(string(b), cfg.LogoPalette)), nil
 	}
 	cache := filepath.Join(configRoot(), "logos", slug(cfg.Logo)+".txt")
 	if b, e := os.ReadFile(cache); e == nil {
@@ -1522,7 +1751,7 @@ func loadLogo(ff string, cfg Config, configFile string) ([][]LogoCell, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not load Fastfetch logo %q: %w", cfg.Logo, err)
 	}
-	rows := parseLogo(string(out))
+	rows := parseLogo(applyLogoPalette(string(out), cfg.LogoPalette))
 	if len(rows) == 0 {
 		return nil, errors.New("Fastfetch returned an empty logo; check the logo name with fastfetch --list-logos")
 	}

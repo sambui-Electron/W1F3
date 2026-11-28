@@ -1279,6 +1279,8 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 	if len(logo) > 0 {
 		logoWidth := len(logo[0])
 		logoBounds = centeredContentRect(layout.Logo, logoWidth, len(logo))
+		logoBounds.X -= cfg.LogoPaddingRight / 2
+		logoBounds.Y += cfg.LogoPaddingTop
 		for y, row := range logo {
 			yy := logoBounds.Y + y
 			if yy < layout.Logo.Y || yy >= layout.Logo.Y+layout.Logo.H || yy < 0 || yy >= rows {
@@ -1585,6 +1587,20 @@ func main() {
 	}
 }
 
+func applyLogoSlots(data string, colors map[string]string) string {
+	for slot, hex := range colors {
+		hex = strings.TrimPrefix(strings.TrimSpace(hex), "#")
+		if len(hex) != 6 { continue }
+		r, e1 := strconv.ParseUint(hex[0:2],16,8)
+		g, e2 := strconv.ParseUint(hex[2:4],16,8)
+		b, e3 := strconv.ParseUint(hex[4:6],16,8)
+		if e1 != nil || e2 != nil || e3 != nil { continue }
+		ansi := fmt.Sprintf("\x1b[38;2;%d;%d;%dm",r,g,b)
+		data = strings.ReplaceAll(data, "$"+slot, ansi)
+	}
+	return data
+}
+
 func loadLogo(ff string, cfg Config, configFile string) ([][]LogoCell, error) {
 	if cfg.LogoFile != "" {
 		p := expandPath(cfg.LogoFile)
@@ -1595,7 +1611,7 @@ func loadLogo(ff string, cfg Config, configFile string) ([][]LogoCell, error) {
 		if e != nil {
 			return nil, e
 		}
-		return parseLogo(string(b)), nil
+		return parseLogo(applyLogoSlots(string(b), cfg.LogoColors)), nil
 	}
 	cache := filepath.Join(configRoot(), "logos", slug(cfg.Logo)+".txt")
 	if b, e := os.ReadFile(cache); e == nil {
@@ -1608,7 +1624,7 @@ func loadLogo(ff string, cfg Config, configFile string) ([][]LogoCell, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not load Fastfetch logo %q: %w", cfg.Logo, err)
 	}
-	rows := parseLogo(string(out))
+	rows := parseLogo(applyLogoSlots(string(out), cfg.LogoColors))
 	if len(rows) == 0 {
 		return nil, errors.New("Fastfetch returned an empty logo; check the logo name with fastfetch --list-logos")
 	}

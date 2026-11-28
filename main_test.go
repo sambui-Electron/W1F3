@@ -391,12 +391,26 @@ func TestFastfetchQueryUsesOnlySelectedNonNativeFields(t *testing.T) {
 	got := fastfetchFieldsForConfig([]string{
 		"os", "kernel", "uptime", "shell", "disk", "battery", "wifi", "cpu", "battery",
 	})
-	want := []string{"os", "battery", "wifi", "cpu"}
+	want := []string{"os", "kernel", "battery", "wifi", "cpu"}
 	if !equalStrings(got, want) {
 		t.Fatalf("Fastfetch fields = %#v, want %#v", got, want)
 	}
-	if got := fastfetchFieldsForConfig([]string{"disk", "kernel", "uptime", "shell"}); len(got) != 0 {
+	if got := fastfetchFieldsForConfig([]string{"disk", "uptime", "shell"}); len(got) != 0 {
 		t.Fatalf("native-only fields must not be queried from Fastfetch: %#v", got)
+	}
+}
+
+func TestKernelUsesActualFastfetchRelease(t *testing.T) {
+	mods := map[string]any{
+		"kernel": map[string]any{
+			"name":    "Windows",
+			"release": "10.0.26100.1",
+			"version": "Microsoft Windows NT",
+		},
+	}
+	got := buildInfo(mods, []string{"kernel"}, NativeInfo{})
+	if len(got) != 1 || got[0].Value != "Windows 10.0.26100.1" {
+		t.Fatalf("kernel should show the actual release, got %#v", got)
 	}
 }
 

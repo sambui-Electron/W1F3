@@ -171,20 +171,20 @@ type yamlDocument struct {
 	Logo             yaml.Node `yaml:"logo"`
 	LogoFile         string    `yaml:"logo_file"`
 	FastfetchPath    string    `yaml:"fastfetch_path"`
-	Refresh          float64   `yaml:"refresh"`
-	Speed            float64   `yaml:"speed"`
-	Size             float64   `yaml:"size"`
-	Depth            float64   `yaml:"depth"`
+	Refresh          *float64  `yaml:"refresh"`
+	Speed            *float64  `yaml:"speed"`
+	Size             *float64  `yaml:"size"`
+	Depth            *float64  `yaml:"depth"`
 	Spin             string    `yaml:"spin"`
-	Height           int       `yaml:"height"`
-	AdaptiveScale    bool      `yaml:"adaptive_scale"`
-	AdaptiveStrength float64   `yaml:"adaptive_strength"`
-	AdaptiveMin      float64   `yaml:"adaptive_min"`
-	AdaptiveMax      float64   `yaml:"adaptive_max"`
-	Mouse            bool      `yaml:"mouse"`
-	Color            bool      `yaml:"color"`
-	ShowInfo         bool      `yaml:"show_info"`
-	Box              bool      `yaml:"box"`
+	Height           *int      `yaml:"height"`
+	AdaptiveScale    *bool     `yaml:"adaptive_scale"`
+	AdaptiveStrength *float64  `yaml:"adaptive_strength"`
+	AdaptiveMin      *float64  `yaml:"adaptive_min"`
+	AdaptiveMax      *float64  `yaml:"adaptive_max"`
+	Mouse            *bool     `yaml:"mouse"`
+	Color            *bool     `yaml:"color"`
+	ShowInfo         *bool     `yaml:"show_info"`
+	Box              *bool     `yaml:"box"`
 	Fields           []string  `yaml:"fields"`
 	Modules          []yaml.Node `yaml:"modules"`
 	Display          struct { Separator string `yaml:"separator"` } `yaml:"display"`
@@ -206,17 +206,20 @@ func parseYAMLConfig(data []byte, base Config) (Config, error) {
 	}
 	cfg.LogoFile = doc.LogoFile
 	cfg.Fastfetch = doc.FastfetchPath
-	if doc.Refresh != 0 { cfg.Refresh = doc.Refresh }
-	if doc.Speed != 0 { cfg.Speed = doc.Speed }
-	if doc.Size != 0 { cfg.Size = doc.Size }
-	if doc.Depth != 0 { cfg.Depth = doc.Depth }
+	if doc.Refresh != nil { cfg.Refresh = *doc.Refresh }
+	if doc.Speed != nil { cfg.Speed = *doc.Speed }
+	if doc.Size != nil { cfg.Size = *doc.Size }
+	if doc.Depth != nil { cfg.Depth = *doc.Depth }
 	if doc.Spin != "" { cfg.Spin = strings.ToLower(doc.Spin) }
-	if doc.Height != 0 { cfg.Height = doc.Height }
-	cfg.AdaptiveScale = doc.AdaptiveScale
-	if doc.AdaptiveStrength != 0 { cfg.AdaptiveStrength = doc.AdaptiveStrength }
-	if doc.AdaptiveMin != 0 { cfg.AdaptiveMin = doc.AdaptiveMin }
-	if doc.AdaptiveMax != 0 { cfg.AdaptiveMax = doc.AdaptiveMax }
-	cfg.Mouse, cfg.Color, cfg.ShowInfo, cfg.Box = doc.Mouse, doc.Color, doc.ShowInfo, doc.Box
+	if doc.Height != nil { cfg.Height = *doc.Height }
+	if doc.AdaptiveScale != nil { cfg.AdaptiveScale = *doc.AdaptiveScale }
+	if doc.AdaptiveStrength != nil { cfg.AdaptiveStrength = *doc.AdaptiveStrength }
+	if doc.AdaptiveMin != nil { cfg.AdaptiveMin = *doc.AdaptiveMin }
+	if doc.AdaptiveMax != nil { cfg.AdaptiveMax = *doc.AdaptiveMax }
+	if doc.Mouse != nil { cfg.Mouse = *doc.Mouse }
+	if doc.Color != nil { cfg.Color = *doc.Color }
+	if doc.ShowInfo != nil { cfg.ShowInfo = *doc.ShowInfo }
+	if doc.Box != nil { cfg.Box = *doc.Box }
 	if doc.Separator != "" { cfg.Separator = doc.Separator }
 	if doc.Display.Separator != "" { cfg.Separator = doc.Display.Separator }
 	if doc.Logo.Kind != 0 {
@@ -1205,7 +1208,7 @@ func stripInfoANSI(input string) (string, string) {
 			end := strings.IndexByte(input[i+2:], 'm')
 			if end >= 0 {
 				seq := input[i+2:i+2+end]
-				if strings.Contains(seq, "90") || strings.Contains(seq, "2") { color = cDim }
+				if seq == "90" || strings.HasPrefix(seq, "90;") { color = cDim }
 				if seq == "0" { color = cWhite }
 				i += end + 3
 				continue
@@ -1398,8 +1401,6 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 		put(canvas, contentX, startY, clip(userHost, infoW), "\x1b[1;38;5;81m", infoW)
 		put(canvas, contentX, startY+1, strings.Repeat("─", minInt(infoW, maxInt(12, len(userHost)))), cDim, infoW)
 		y := startY + 2
-		keyW := minInt(11, maxInt(5, infoW/4))
-		valueW := infoW - keyW - 2
 		for _, line := range info {
 			if y >= rows { break }
 			if line.Kind == "blank" { y++; continue }
@@ -1423,9 +1424,19 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 			if len(line.Lines) > 0 {
 				labelColor := line.LabelColor
 				if labelColor == "" { labelColor = cCyan }
-				put(canvas, contentX, y, clip(line.Label+":", infoW), labelColor, infoW)
+				separator := line.Separator
+				if separator == "" { separator = cfg.Separator }
+				if separator == "" { separator = ": " }
+				label := clip(line.Label, infoW)
+				labelWidth := displayWidth(label)
+				put(canvas, contentX, y, label, labelColor, infoW)
+				put(canvas, contentX+labelWidth, y, separator, cDim, displayWidth(separator))
+				valueX := contentX + labelWidth + displayWidth(separator)
+				if len(line.Lines) > 0 && valueX < contentX+infoW {
+					put(canvas, valueX, y, clip(line.Lines[0], infoW-(valueX-contentX)), cWhite, infoW-(valueX-contentX))
+				}
 				y++
-				for _, item := range line.Lines {
+				for _, item := range line.Lines[1:] {
 					if y >= rows { break }
 					put(canvas, contentX+4, y, clip(item, infoW-4), cWhite, infoW-4)
 					y++

@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json
 # W1F3 configuration
 # Native W1F3 settings translated from the supplied Fastfetch profile.
 # Stored at %USERPROFILE%\.config\fetch\config.yaml.

@@ -78,9 +78,9 @@ type Config struct {
 	ShowInfo         bool
 	Box              bool
 	Fields           []string
-	Modules          []ModuleConfig
+	Layout           []LayoutItem
 	Separator        string
-	LogoColors       map[string]string
+	LogoPalette      map[string]string
 	LogoPaddingTop   int
 	LogoPaddingRight int
 }
@@ -159,19 +159,28 @@ func parseYAMLConfig(data []byte, base Config) (Config, error) {
 	return parseAdvancedYAMLConfig(data, base)
 }
 
-type ModuleConfig struct {
-	Type string `yaml:"type"`
-	Key string `yaml:"key"`
-	KeyColor string `yaml:"key_color"`
-	Format string `yaml:"format"`
-	PaddingLeft int `yaml:"padding_left"`
-	Symbol string `yaml:"symbol"`
+// LayoutItem is W1F3's native display-layout instruction. It deliberately
+// does not mirror Fastfetch's module configuration syntax.
+type LayoutItem struct {
+	Type        string `yaml:"type"`
+	Field       string `yaml:"field"`
+	Label       string `yaml:"label"`
+	Color       string `yaml:"color"`
+	Text        string `yaml:"text"`
+	PaddingLeft int    `yaml:"padding_left"`
+	Symbol      string `yaml:"symbol"`
 }
 
 type yamlDocument struct {
-	Logo any `yaml:"logo"`
+	Logo string `yaml:"logo"`
 	LogoFile string `yaml:"logo_file"`
 	FastfetchPath string `yaml:"fastfetch_path"`
+	LogoPalette map[string]string `yaml:"logo_palette"`
+	LogoPadding struct {
+		Top int `yaml:"top"`
+		Right int `yaml:"right"`
+	} `yaml:"logo_padding"`
+	Separator string `yaml:"separator"`
 	Refresh float64 `yaml:"refresh"`
 	Speed float64 `yaml:"speed"`
 	Size float64 `yaml:"size"`
@@ -187,47 +196,22 @@ type yamlDocument struct {
 	ShowInfo *bool `yaml:"show_info"`
 	Box *bool `yaml:"box"`
 	Fields []string `yaml:"fields"`
-	Display struct { Separator string `yaml:"separator"` } `yaml:"display"`
-	Renderer struct {
-		Refresh float64 `yaml:"refresh"`
-		Speed float64 `yaml:"speed"`
-		Size float64 `yaml:"size"`
-		Depth float64 `yaml:"depth"`
-		Spin string `yaml:"spin"`
-		Height int `yaml:"height"`
-		AdaptiveScale *bool `yaml:"adaptive_scale"`
-		AdaptiveStrength float64 `yaml:"adaptive_strength"`
-		AdaptiveMin float64 `yaml:"adaptive_min"`
-		AdaptiveMax float64 `yaml:"adaptive_max"`
-		Mouse *bool `yaml:"mouse"`
-	} `yaml:"renderer"`
-	Modules []ModuleConfig `yaml:"modules"`
+	Layout []LayoutItem `yaml:"layout"`
 }
 
 func parseAdvancedYAMLConfig(data []byte, base Config) (Config, error) {
 	doc := yamlDocument{}
-	if err := yaml.Unmarshal(data, &doc); err != nil { return base, fmt.Errorf("parse YAML: %w", err) }
-	cfg := base
-	// Preserve the legacy flat YAML format while accepting the structured layout.
-	if doc.Logo != nil {
-		switch v := doc.Logo.(type) {
-		case string: cfg.Logo = v
-		case map[string]interface{}:
-			if typ, _ := v["type"].(string); typ == "file" {
-				if src, ok := v["source"].(string); ok { cfg.LogoFile = src }
-			}
-			if colors, ok := v["color"].(map[string]interface{}); ok {
-				cfg.LogoColors = map[string]string{}
-				for k, value := range colors { cfg.LogoColors[k] = fmt.Sprint(value) }
-			}
-			if pad, ok := v["padding"].(map[string]interface{}); ok {
-				cfg.LogoPaddingTop = yamlInt(pad["top"])
-				cfg.LogoPaddingRight = yamlInt(pad["right"])
-			}
-		}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return base, fmt.Errorf("parse YAML: %w", err)
 	}
+	cfg := base
+	if doc.Logo != "" { cfg.Logo = doc.Logo }
 	if doc.LogoFile != "" { cfg.LogoFile = doc.LogoFile }
 	if doc.FastfetchPath != "" { cfg.Fastfetch = doc.FastfetchPath }
+	if doc.LogoPalette != nil { cfg.LogoPalette = doc.LogoPalette }
+	cfg.LogoPaddingTop = doc.LogoPadding.Top
+	cfg.LogoPaddingRight = doc.LogoPadding.Right
+	if doc.Separator != "" { cfg.Separator = doc.Separator }
 	if doc.Refresh != 0 { cfg.Refresh = doc.Refresh }
 	if doc.Speed != 0 { cfg.Speed = doc.Speed }
 	if doc.Size != 0 { cfg.Size = doc.Size }
@@ -243,35 +227,9 @@ func parseAdvancedYAMLConfig(data []byte, base Config) (Config, error) {
 	if doc.ShowInfo != nil { cfg.ShowInfo = *doc.ShowInfo }
 	if doc.Box != nil { cfg.Box = *doc.Box }
 	if doc.Fields != nil { cfg.Fields = doc.Fields }
-	if doc.Display.Separator != "" { cfg.Separator = doc.Display.Separator }
-	if doc.Renderer.Refresh != 0 { cfg.Refresh = doc.Renderer.Refresh }
-	if doc.Renderer.Speed != 0 { cfg.Speed = doc.Renderer.Speed }
-	if doc.Renderer.Size != 0 { cfg.Size = doc.Renderer.Size }
-	if doc.Renderer.Depth != 0 { cfg.Depth = doc.Renderer.Depth }
-	if doc.Renderer.Spin != "" { cfg.Spin = doc.Renderer.Spin }
-	if doc.Renderer.Height != 0 { cfg.Height = doc.Renderer.Height }
-	if doc.Renderer.AdaptiveScale != nil { cfg.AdaptiveScale = *doc.Renderer.AdaptiveScale }
-	if doc.Renderer.AdaptiveStrength != 0 { cfg.AdaptiveStrength = doc.Renderer.AdaptiveStrength }
-	if doc.Renderer.AdaptiveMin != 0 { cfg.AdaptiveMin = doc.Renderer.AdaptiveMin }
-	if doc.Renderer.AdaptiveMax != 0 { cfg.AdaptiveMax = doc.Renderer.AdaptiveMax }
-	if doc.Renderer.Mouse != nil { cfg.Mouse = *doc.Renderer.Mouse }
-	if len(doc.Modules) > 0 {
-		cfg.Modules = doc.Modules
-		cfg.Fields = configuredFields(cfg)
-	}
-	if len(cfg.Fields) == 0 && len(cfg.Modules) == 0 { cfg.Fields = []string{} }
-	seenFields := map[string]bool{}
-	for _, f := range cfg.Fields {
-		f = strings.ToLower(strings.TrimSpace(f))
-		if !isSupportedInfoField(f) { return cfg, fmt.Errorf("unsupported information field %q", f) }
-		if seenFields[f] { return cfg, fmt.Errorf("duplicate information field %q", f) }
-		seenFields[f] = true
-	}
-	allowedModules := map[string]bool{"break":true,"custom":true,"colors":true,"os_age":true}
-	for _, f := range supportedInfoFields { allowedModules[f] = true }
-	for _, m := range cfg.Modules {
-		t := strings.ToLower(strings.TrimSpace(m.Type))
-		if !allowedModules[t] { return cfg, fmt.Errorf("unsupported module type %q", m.Type) }
+	if doc.Layout != nil {
+		cfg.Layout = doc.Layout
+		cfg.Fields = layoutFields(cfg.Layout)
 	}
 	if cfg.Refresh < 0.2 { cfg.Refresh = 0.2 }
 	if cfg.Speed < 0 { cfg.Speed = 0 }
@@ -282,48 +240,57 @@ func parseAdvancedYAMLConfig(data []byte, base Config) (Config, error) {
 	if cfg.AdaptiveMin < 1 { cfg.AdaptiveMin = 1 }
 	if cfg.AdaptiveMax < cfg.AdaptiveMin { cfg.AdaptiveMax = cfg.AdaptiveMin }
 	if cfg.AdaptiveMax > 1.5 { cfg.AdaptiveMax = 1.5 }
+	for _, f := range cfg.Fields {
+		if !isSupportedInfoField(f) { return cfg, fmt.Errorf("unsupported information field %q", f) }
+	}
+	for _, item := range cfg.Layout {
+		switch item.Type {
+		case "field":
+			if item.Field != "os_age" && !isSupportedInfoField(item.Field) {
+				return cfg, fmt.Errorf("unsupported layout field %q", item.Field)
+			}
+		case "text", "blank", "palette":
+		default:
+			return cfg, fmt.Errorf("unsupported layout item type %q", item.Type)
+		}
+	}
 	return cfg, nil
 }
 
-func yamlInt(v interface{}) int {
-	switch n := v.(type) {
-	case int: return n
-	case int64: return int(n)
-	case float64: return int(n)
-	default: return 0
-	}
-}
-
-func configuredFields(cfg Config) []string {
-	if len(cfg.Modules) == 0 { return cfg.Fields }
+func layoutFields(layout []LayoutItem) []string {
 	fields := []string{}
 	seen := map[string]bool{}
-	for _, m := range cfg.Modules {
-		t := strings.ToLower(strings.TrimSpace(m.Type))
-		if t == "" || t == "break" || t == "custom" || t == "colors" || seen[t] { continue }
-		if isSupportedInfoField(t) { fields = append(fields, t); seen[t] = true }
+	for _, item := range layout {
+		if item.Type != "field" { continue }
+		field := strings.ToLower(strings.TrimSpace(item.Field))
+		if field == "" || field == "os_age" || seen[field] { continue }
+		fields = append(fields, field)
+		seen[field] = true
 	}
 	return fields
 }
 
-func buildConfiguredInfo(mods map[string]any, modules []ModuleConfig, native NativeInfo) []InfoLine {
+func buildLayoutInfo(mods map[string]any, layout []LayoutItem, native NativeInfo) []InfoLine {
 	out := []InfoLine{}
-	for _, m := range modules {
-		t := strings.ToLower(strings.TrimSpace(m.Type))
-		switch t {
-		case "break": out = append(out, InfoLine{Break:true})
-		case "custom": out = append(out, InfoLine{Custom:m.Format})
-		case "colors": out = append(out, InfoLine{Colors:true, PaddingLeft:m.PaddingLeft, Symbol:m.Symbol})
-		default:
-			if t == "os_age" {
-				if age := windowsOSAge(); age != "" { out = append(out, InfoLine{Label:m.Key, Value:age, KeyColor:ansiColor(m.KeyColor)}) }
+	for _, item := range layout {
+		switch item.Type {
+		case "blank":
+			out = append(out, InfoLine{Break:true})
+		case "text":
+			out = append(out, InfoLine{Custom:item.Text, CustomColor:ansiColor(item.Color)})
+		case "palette":
+			out = append(out, InfoLine{Colors:true, PaddingLeft:item.PaddingLeft, Symbol:item.Symbol})
+		case "field":
+			field := strings.ToLower(strings.TrimSpace(item.Field))
+			if field == "os_age" {
+				age := windowsOSAge()
+				if age != "" { out = append(out, InfoLine{Label:item.Label, Value:age, KeyColor:ansiColor(item.Color)}) }
 				continue
 			}
-			if !isSupportedInfoField(t) { continue }
-			lines := buildInfo(mods, []string{t}, native)
+			lines := buildInfo(mods, []string{field}, native)
 			for _, line := range lines {
-				if m.Key != "" { line.Label = m.Key }
-				line.KeyColor = ansiColor(m.KeyColor)
+				if item.Label != "" { line.Label = item.Label }
+				line.KeyColor = ansiColor(item.Color)
 				out = append(out, line)
 			}
 		}
@@ -1149,10 +1116,16 @@ type InfoLine struct {
 	Lines        []string
 	KeyColor     string
 	Custom       string
+	CustomColor  string
 	Break        bool
 	Colors       bool
 	PaddingLeft  int
 	Symbol       string
+}
+
+func layoutFieldsOrFields(cfg Config) []string {
+	if len(cfg.Layout) > 0 { return layoutFields(cfg.Layout) }
+	return cfg.Fields
 }
 
 func buildInfo(mods map[string]any, fields []string, native NativeInfo) []InfoLine {
@@ -1302,8 +1275,9 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 	if len(logo) > 0 {
 		logoWidth := len(logo[0])
 		logoBounds = centeredContentRect(layout.Logo, logoWidth, len(logo))
-		logoBounds.X -= cfg.LogoPaddingRight / 2
 		logoBounds.Y += cfg.LogoPaddingTop
+		layout.InfoX += cfg.LogoPaddingRight
+		layout.InfoW = maxInt(0, layout.InfoW-cfg.LogoPaddingRight)
 		for y, row := range logo {
 			yy := logoBounds.Y + y
 			if yy < layout.Logo.Y || yy >= layout.Logo.Y+layout.Logo.H || yy < 0 || yy >= rows {
@@ -1361,7 +1335,9 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 			if y >= rows { break }
 			if line.Break { y++; continue }
 			if line.Custom != "" {
-				put(canvas, contentX, y, clip(stripANSI(line.Custom), infoW), cDim, infoW)
+				customColor := line.CustomColor
+				if customColor == "" { customColor = cDim }
+				put(canvas, contentX, y, clip(stripANSI(line.Custom), infoW), customColor, infoW)
 				y++; continue
 			}
 			if line.Colors {
@@ -1506,7 +1482,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	mods, err := fetchModules(ff, configuredFields(cfg))
+	mods, err := fetchModules(ff, layoutFieldsOrFields(cfg))
 	if err != nil {
 		fatal(err)
 	}
@@ -1542,8 +1518,8 @@ func main() {
 				time.Sleep(300 * time.Millisecond)
 			}
 			native := readNativeInfo()
-			if len(cfg.Modules) > 0 {
-				info = buildConfiguredInfo(mods, cfg.Modules, native)
+			if len(cfg.Layout) > 0 {
+				info = buildLayoutInfo(mods, cfg.Layout, native)
 			} else {
 				info = buildInfo(mods, cfg.Fields, native)
 			}
@@ -1634,7 +1610,7 @@ func loadLogo(ff string, cfg Config, configFile string) ([][]LogoCell, error) {
 		if e != nil {
 			return nil, e
 		}
-		return parseLogo(applyLogoSlots(string(b), cfg.LogoColors)), nil
+		return parseLogo(applyLogoSlots(string(b), cfg.LogoPalette)), nil
 	}
 	cache := filepath.Join(configRoot(), "logos", slug(cfg.Logo)+".txt")
 	if b, e := os.ReadFile(cache); e == nil {
@@ -1647,7 +1623,7 @@ func loadLogo(ff string, cfg Config, configFile string) ([][]LogoCell, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not load Fastfetch logo %q: %w", cfg.Logo, err)
 	}
-	rows := parseLogo(applyLogoSlots(string(out), cfg.LogoColors))
+	rows := parseLogo(applyLogoSlots(string(out), cfg.LogoPalette))
 	if len(rows) == 0 {
 		return nil, errors.New("Fastfetch returned an empty logo; check the logo name with fastfetch --list-logos")
 	}

@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"gopkg.in/yaml.v3"
 )
 
 const version = "0.5.2"
@@ -76,6 +78,11 @@ type Config struct {
 	ShowInfo         bool
 	Box              bool
 	Fields           []string
+	Modules          []ModuleConfig
+	Separator        string
+	LogoColors       map[string]string
+	LogoPaddingTop   int
+	LogoPaddingRight int
 }
 
 // supportedInfoFields mirrors the current Fastfetch information modules W1F3
@@ -150,145 +157,7 @@ func configPath() string { return filepath.Join(configRoot(), "config.yaml") }
 // config. It keeps the executable dependency-free while accepting ordinary YAML
 // comments, quoted values, booleans, numbers and block lists.
 func parseYAMLConfig(data []byte, base Config) (Config, error) {
-	cfg := base
-	section := ""
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := strings.TrimRight(scanner.Text(), " \t\r")
-		trim := strings.TrimSpace(line)
-		if trim == "" || strings.HasPrefix(trim, "#") || trim == "---" || trim == "..." {
-			continue
-		}
-		if strings.HasPrefix(trim, "- ") {
-			if section != "fields" {
-				return cfg, fmt.Errorf("config line %d: list item outside fields", lineNo)
-			}
-			v := unquoteYAML(stripYAMLComment(strings.TrimSpace(strings.TrimPrefix(trim, "- "))))
-			if v != "" {
-				cfg.Fields = append(cfg.Fields, strings.ToLower(v))
-			}
-			continue
-		}
-		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
-			return cfg, fmt.Errorf("config line %d: unsupported nested YAML value", lineNo)
-		}
-		pair := strings.SplitN(trim, ":", 2)
-		if len(pair) != 2 {
-			return cfg, fmt.Errorf("config line %d: expected key: value", lineNo)
-		}
-		key := strings.ToLower(strings.TrimSpace(pair[0]))
-		raw := strings.TrimSpace(stripYAMLComment(strings.TrimSpace(pair[1])))
-		if raw == "" {
-			if key == "fields" {
-				cfg.Fields = nil
-				section = "fields"
-				continue
-			}
-			return cfg, fmt.Errorf("config line %d: empty value for %s", lineNo, key)
-		}
-		section = ""
-		value := unquoteYAML(raw)
-		parseFloat := func() (float64, error) { return strconv.ParseFloat(value, 64) }
-		parseBool := func() (bool, error) { return strconv.ParseBool(strings.ToLower(value)) }
-		parseInt := func() (int, error) { n, e := strconv.Atoi(value); return n, e }
-		var err error
-		switch key {
-		case "logo":
-			cfg.Logo = value
-		case "logo_file":
-			cfg.LogoFile = value
-		case "fastfetch_path":
-			cfg.Fastfetch = value
-		case "refresh":
-			cfg.Refresh, err = parseFloat()
-		case "speed":
-			cfg.Speed, err = parseFloat()
-		case "size":
-			cfg.Size, err = parseFloat()
-		case "depth":
-			cfg.Depth, err = parseFloat()
-		case "spin":
-			cfg.Spin = strings.ToLower(value)
-		case "height":
-			cfg.Height, err = parseInt()
-		case "adaptive_scale":
-			cfg.AdaptiveScale, err = parseBool()
-		case "adaptive_strength":
-			cfg.AdaptiveStrength, err = parseFloat()
-		case "adaptive_min":
-			cfg.AdaptiveMin, err = parseFloat()
-		case "adaptive_max":
-			cfg.AdaptiveMax, err = parseFloat()
-		case "mouse":
-			cfg.Mouse, err = parseBool()
-		case "color":
-			cfg.Color, err = parseBool()
-		case "show_info":
-			cfg.ShowInfo, err = parseBool()
-		case "box":
-			cfg.Box, err = parseBool()
-		case "fields":
-			cfg.Fields = nil
-			for _, item := range strings.Split(value, ",") {
-				item = strings.TrimSpace(item)
-				if item != "" {
-					cfg.Fields = append(cfg.Fields, strings.ToLower(unquoteYAML(item)))
-				}
-			}
-		default:
-			return cfg, fmt.Errorf("config line %d: unknown key %q", lineNo, key)
-		}
-		if err != nil {
-			return cfg, fmt.Errorf("config line %d (%s): %w", lineNo, key, err)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return cfg, err
-	}
-	seenFields := make(map[string]bool, len(cfg.Fields))
-	for _, field := range cfg.Fields {
-		field = strings.ToLower(strings.TrimSpace(field))
-		if !isSupportedInfoField(field) {
-			return cfg, fmt.Errorf("unsupported information field %q; see config.schema.json for available fields", field)
-		}
-		if seenFields[field] {
-			return cfg, fmt.Errorf("duplicate information field %q", field)
-		}
-		seenFields[field] = true
-	}
-	if len(cfg.Fields) == 0 {
-		cfg.Fields = []string{}
-	}
-	if cfg.Refresh < 0.2 {
-		cfg.Refresh = 0.2
-	}
-	if cfg.Speed < 0 {
-		cfg.Speed = 0
-	}
-	if cfg.Size < 0.2 {
-		cfg.Size = 0.2
-	}
-	if cfg.Depth < 0.1 {
-		cfg.Depth = 0.1
-	}
-	if cfg.Height < 0 {
-		cfg.Height = 0
-	}
-	if cfg.AdaptiveStrength < 0 {
-		cfg.AdaptiveStrength = 0
-	}
-	if cfg.AdaptiveMin < 1.0 {
-		cfg.AdaptiveMin = 1.0
-	}
-	if cfg.AdaptiveMax < cfg.AdaptiveMin {
-		cfg.AdaptiveMax = cfg.AdaptiveMin
-	}
-	if cfg.AdaptiveMax > 1.5 {
-		cfg.AdaptiveMax = 1.5
-	}
-	return cfg, nil
+	return parseAdvancedYAMLConfig(data, base)
 }
 
 func stripYAMLComment(s string) string {
@@ -1075,6 +944,12 @@ func clip(s string, width int) string {
 type InfoLine struct {
 	Label, Value string
 	Lines        []string
+	KeyColor     string
+	Custom       string
+	Break        bool
+	Colors       bool
+	PaddingLeft  int
+	Symbol       string
 }
 
 func buildInfo(mods map[string]any, fields []string, native NativeInfo) []InfoLine {
@@ -1399,7 +1274,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	mods, err := fetchModules(ff, cfg.Fields)
+	mods, err := fetchModules(ff, configuredFields(cfg))
 	if err != nil {
 		fatal(err)
 	}
@@ -1428,14 +1303,18 @@ func main() {
 	for {
 		now := time.Now()
 		if lastRefresh.IsZero() || now.Sub(lastRefresh) >= time.Duration(cfg.Refresh*float64(time.Second)) {
-			if fresh, e := fetchModules(ff, cfg.Fields); e == nil {
+			if fresh, e := fetchModules(ff, configuredFields(cfg)); e == nil {
 				mods = fresh
 			}
 			if lastRefresh.IsZero() {
 				time.Sleep(300 * time.Millisecond)
 			}
 			native := readNativeInfo()
-			info = buildInfo(mods, cfg.Fields, native)
+			if len(cfg.Modules) > 0 {
+				info = buildConfiguredInfo(mods, cfg.Modules, native)
+			} else {
+				info = buildInfo(mods, cfg.Fields, native)
+			}
 			lastRefresh = now
 		}
 		cols, rows := terminalSize()

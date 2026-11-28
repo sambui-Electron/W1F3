@@ -167,3 +167,58 @@ The disk section lists each drive as `C (Windows): USED_GB/TOTAL_GB (PERCENT%)`.
 ### Adaptive scale limit
 
 Window-size scaling uses the geometric mean of the terminal width and height relative to a 120×36 baseline. This allows wider terminals to contribute to scaling even when their aspect ratio is unusually wide. The adaptive multiplier never falls below 1.0x and is capped at 1.5x. If the configured or command-line base logo size is greater than 1.5x, the adaptive multiplier is disabled and the renderer uses the configured fixed logo-height limit, even when `adaptive_scale` is still set to `true`. A base size of exactly 1.5x still permits adaptive scaling. The logo can still contract to fit a terminal that is too small for its configured size. The rendered logo canvas is centered inside its allocated viewport on every frame, keeping fixed-height mode aligned as the terminal is resized; the mouse-drag hit area remains the full viewport. Disk entries are indented by four terminal columns beneath the `Disk:` heading.
+
+
+## Structured YAML configuration
+
+W1F3 keeps YAML as its configuration format. In addition to the original flat
+`fields:` list, it supports an ordered `modules:` list for Fastfetch-style
+layouts. Each module can define its own display key and key color.
+
+Example:
+
+```yaml
+logo:
+  type: file
+  source: "./ascii.txt"
+  color:
+    "1": "#CDD6F4"
+  padding:
+    top: 1
+    right: 3
+
+display:
+  separator: " "
+
+renderer:
+  speed: 0.45
+  mouse: true
+
+modules:
+  - type: custom
+    format: "Hardware"
+  - type: cpu
+    key: "│ ├ CPU "
+    key_color: green
+  - type: memory
+    key: "└ └ Memory "
+    key_color: green
+  - type: break
+  - type: uptime
+    key: "› Uptime "
+    key_color: magenta
+  - type: colors
+    padding_left: 18
+    symbol: circle
+```
+
+Supported presentation modules are `break`, `custom`, and `colors`.
+Information modules use the same module names exposed by W1F3's Fastfetch
+field catalog. The Windows-native `os_age` module reports the age of the
+current Windows installation. Legacy `fields:` configurations remain
+supported.
+
+The schema at `config.schema.json` provides YAML editor completion and
+validation. Copy the structured example in `config.yaml` to
+`%USERPROFILE%\\.config\\fetch\\config.yaml`, then adjust the logo path
+for your machine.

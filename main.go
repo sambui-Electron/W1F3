@@ -261,8 +261,18 @@ func parseAdvancedYAMLConfig(data []byte, base Config) (Config, error) {
 		cfg.Fields = configuredFields(cfg)
 	}
 	if len(cfg.Fields) == 0 && len(cfg.Modules) == 0 { cfg.Fields = []string{} }
+	seenFields := map[string]bool{}
 	for _, f := range cfg.Fields {
+		f = strings.ToLower(strings.TrimSpace(f))
 		if !isSupportedInfoField(f) { return cfg, fmt.Errorf("unsupported information field %q", f) }
+		if seenFields[f] { return cfg, fmt.Errorf("duplicate information field %q", f) }
+		seenFields[f] = true
+	}
+	allowedModules := map[string]bool{"break":true,"custom":true,"colors":true,"os_age":true}
+	for _, f := range supportedInfoFields { allowedModules[f] = true }
+	for _, m := range cfg.Modules {
+		t := strings.ToLower(strings.TrimSpace(m.Type))
+		if !allowedModules[t] { return cfg, fmt.Errorf("unsupported module type %q", m.Type) }
 	}
 	return cfg, nil
 }

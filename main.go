@@ -196,11 +196,11 @@ type yamlDocument struct {
 		Depth float64 `yaml:"depth"`
 		Spin string `yaml:"spin"`
 		Height int `yaml:"height"`
-		AdaptiveScale bool `yaml:"adaptive_scale"`
+		AdaptiveScale *bool `yaml:"adaptive_scale"`
 		AdaptiveStrength float64 `yaml:"adaptive_strength"`
 		AdaptiveMin float64 `yaml:"adaptive_min"`
 		AdaptiveMax float64 `yaml:"adaptive_max"`
-		Mouse bool `yaml:"mouse"`
+		Mouse *bool `yaml:"mouse"`
 	} `yaml:"renderer"`
 	Modules []ModuleConfig `yaml:"modules"`
 }

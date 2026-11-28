@@ -1229,6 +1229,20 @@ func centeredContentRect(viewport Rect, contentW, contentH int) Rect {
 	}
 }
 
+func stripANSI(value string) string {
+	var b strings.Builder
+	for i:=0; i<len(value); {
+		if value[i] == 0x1b && i+1<len(value) && value[i+1]=='[' {
+			i+=2
+			for i<len(value) && (value[i]<'@' || value[i]>'~') { i++ }
+			if i<len(value) { i++ }
+			continue
+		}
+		r,n:=decodeRune(value[i:]); b.WriteRune(r); i+=n
+	}
+	return b.String()
+}
+
 func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows int, cfg Config) (string, Rect) {
 	if cols < 32 {
 		cols = 32
@@ -1266,11 +1280,10 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 		contentX := layout.InfoX
 		contentRows := 0
 		for _, line := range info {
-			if len(line.Lines) > 0 {
-				contentRows += 1 + len(line.Lines)
-			} else {
-				contentRows++
-			}
+			if line.Break { contentRows++; continue }
+			if line.Colors { contentRows++; continue }
+			if line.Custom != "" { contentRows++; continue }
+			if len(line.Lines) > 0 { contentRows += 1 + len(line.Lines) } else { contentRows++ }
 		}
 		visible := contentRows + 2
 		startY := maxInt(0, (rows-visible)/2)
@@ -1300,23 +1313,34 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 		keyW := minInt(11, maxInt(5, infoW/4))
 		valueW := infoW - keyW - 2
 		for _, line := range info {
-			if y >= rows {
-				break
+			if y >= rows { break }
+			if line.Break { y++; continue }
+			if line.Custom != "" {
+				put(canvas, contentX, y, clip(stripANSI(line.Custom), infoW), cDim, infoW)
+				y++; continue
 			}
+			if line.Colors {
+				x := contentX + maxInt(0, line.PaddingLeft)
+				symbol := "■"
+				if strings.EqualFold(line.Symbol, "circle") { symbol = "●" }
+				palette := []string{"\x1b[30m","\x1b[31m","\x1b[32m","\x1b[33m","\x1b[34m","\x1b[35m","\x1b[36m","\x1b[37m","\x1b[90m","\x1b[91m","\x1b[92m","\x1b[93m","\x1b[94m","\x1b[95m","\x1b[96m","\x1b[97m"}
+				for _, c := range palette { put(canvas,x,y,symbol,c,1); x++ }
+				y++; continue
+			}
+			keyColor := line.KeyColor
+			if keyColor == "" { keyColor = cCyan }
 			if len(line.Lines) > 0 {
-				put(canvas, contentX, y, clip(line.Label+":", infoW), cCyan, infoW)
+				put(canvas, contentX, y, clip(line.Label+":", infoW), keyColor, infoW)
 				y++
 				for _, item := range line.Lines {
-					if y >= rows {
-						break
-					}
+					if y >= rows { break }
 					put(canvas, contentX+4, y, clip(item, infoW-4), cWhite, infoW-4)
 					y++
 				}
 				continue
 			}
-			put(canvas, contentX, y, clip(line.Label, keyW), cCyan, keyW)
-			put(canvas, contentX+keyW, y, ": ", cDim, 2)
+			put(canvas, contentX, y, clip(line.Label, keyW), keyColor, keyW)
+			put(canvas, contentX+keyW, y, cfg.Separator+": ", cDim, 2)
 			put(canvas, contentX+keyW+2, y, clip(line.Value, valueW), cWhite, valueW)
 			y++
 		}

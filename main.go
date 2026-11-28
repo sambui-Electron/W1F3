@@ -1090,6 +1090,12 @@ func clip(s string, width int) string {
 type InfoLine struct {
 	Label, Value string
 	Lines        []string
+	Kind         string
+	LabelColor   string
+	ValueColor   string
+	Separator    string
+	PaddingLeft  int
+	Symbol       string
 }
 
 func buildInfo(mods map[string]any, fields []string, native NativeInfo) []InfoLine {
@@ -1143,6 +1149,121 @@ func buildInfo(mods map[string]any, fields []string, native NativeInfo) []InfoLi
 		}
 	}
 	return result
+}
+
+func buildConfiguredInfo(mods map[string]any, cfg Config, native NativeInfo) []InfoLine {
+	if len(cfg.Modules) == 0 { return buildInfo(mods, cfg.Fields, native) }
+	result := make([]InfoLine, 0, len(cfg.Modules))
+	for _, module := range cfg.Modules {
+		switch module.Type {
+		case "break":
+			result = append(result, InfoLine{Kind: "blank"})
+		case "custom":
+			text, color := stripInfoANSI(module.Format)
+			result = append(result, InfoLine{Kind: "custom", Value: text, ValueColor: color, PaddingLeft: module.PaddingLeft})
+		case "colors":
+			result = append(result, InfoLine{Kind: "palette", PaddingLeft: module.PaddingLeft, Symbol: module.Symbol})
+		case "command":
+			value, err := runConfiguredCommand(module.Shell, module.Text)
+			if err != nil || strings.TrimSpace(value) == "" { continue }
+			label := module.Key
+			if label == "" { label = "Command" }
+			result = append(result, InfoLine{Label: label, Value: strings.TrimSpace(value), LabelColor: moduleKeyColor(module.KeyColor), ValueColor: cWhite, Separator: cfg.Separator})
+		default:
+			lines := buildInfo(mods, []string{module.Type}, native)
+			if len(lines) == 0 { continue }
+			line := lines[0]
+			if module.Key != "" { line.Label = module.Key }
+			line.LabelColor = moduleKeyColor(module.KeyColor)
+			line.ValueColor = cWhite
+			line.Separator = cfg.Separator
+			result = append(result, line)
+		}
+	}
+	return result
+}
+
+func moduleKeyColor(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "gray", "grey": return cDim
+	case "green": return "\x1b[32m"
+	case "yellow": return "\x1b[33m"
+	case "blue": return "\x1b[34m"
+	case "magenta": return "\x1b[35m"
+	case "cyan": return "\x1b[36m"
+	case "red": return "\x1b[31m"
+	case "white": return cWhite
+	default: return cCyan
+	}
+}
+
+func stripInfoANSI(input string) (string, string) {
+	color := cWhite
+	var out strings.Builder
+	for i := 0; i < len(input); {
+		if input[i] == 0x1b && i+1 < len(input) && input[i+1] == '[' {
+			end := strings.IndexByte(input[i+2:], 'm')
+			if end >= 0 {
+				seq := input[i+2:i+2+end]
+				if strings.Contains(seq, "90") || strings.Contains(seq, "2") { color = cDim }
+				if seq == "0" { color = cWhite }
+				i += end + 3
+				continue
+			}
+		}
+		out.WriteByte(input[i])
+		i++
+	}
+	return out.String(), color
+}
+
+func runConfiguredCommand(shell, command string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var cmd *exec.Cmd
+	switch strings.ToLower(shell) {
+	case "powershell":
+		name := "powershell.exe"
+		if _, err := exec.LookPath(name); err != nil { name = "pwsh" }
+		cmd = exec.CommandContext(ctx, name, "-NoProfile", "-NonInteractive", "-Command", command)
+	case "pwsh":
+		cmd = exec.CommandContext(ctx, "pwsh", "-NoProfile", "-NonInteractive", "-Command", command)
+	case "cmd":
+		cmd = exec.CommandContext(ctx, "cmd.exe", "/C", command)
+	default:
+		return "", fmt.Errorf("unsupported command shell %q", shell)
+	}
+	out, err := cmd.Output()
+	if err != nil { return "", fmt.Errorf("configured command failed: %w", err) }
+	return strings.TrimSpace(string(out)), nil
+}
+
+func applyLogoPalette(data string, palette map[string]string) string {
+	for slot, hex := range palette {
+		if len(hex) != 7 || hex[0] != '#' { continue }
+		rgb, err := strconv.ParseUint(hex[1:], 16, 32)
+		if err != nil { continue }
+		sequence := fmt.Sprintf("\x1b[38;2;%d;%d;%dm", (rgb>>16)&255, (rgb>>8)&255, rgb&255)
+		data = strings.ReplaceAll(data, "$"+slot, sequence)
+	}
+	return data
+}
+
+func displayWidth(value string) int {
+	width := 0
+	for _, r := range value {
+		if isWide(r) { width += 2 } else { width++ }
+	}
+	return width
+}
+
+func computeLayoutForConfig(cols, rows int, cfg Config) Layout {
+	layout := computeLayout(cols, rows, cfg.ShowInfo)
+	if cfg.ShowInfo && cfg.LogoPaddingRight > 0 {
+		layout.InfoX += cfg.LogoPaddingRight
+		layout.InfoW = maxInt(0, layout.InfoW-cfg.LogoPaddingRight)
+	}
+	return layout
 }
 
 func titleCase(s string) string {
@@ -1220,11 +1341,12 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 			canvas[y][x] = Pixel{' ', "", math.Inf(-1)}
 		}
 	}
-	layout := computeLayout(cols, rows, cfg.ShowInfo)
+	layout := computeLayoutForConfig(cols, rows, cfg)
 	logoBounds := layout.Logo
 	if len(logo) > 0 {
 		logoWidth := len(logo[0])
 		logoBounds = centeredContentRect(layout.Logo, logoWidth, len(logo))
+		logoBounds.Y += cfg.LogoPaddingTop
 		for y, row := range logo {
 			yy := logoBounds.Y + y
 			if yy < layout.Logo.Y || yy >= layout.Logo.Y+layout.Logo.H || yy < 0 || yy >= rows {
@@ -1243,7 +1365,9 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 		contentX := layout.InfoX
 		contentRows := 0
 		for _, line := range info {
-			if len(line.Lines) > 0 {
+			if line.Kind == "blank" || line.Kind == "custom" || line.Kind == "palette" {
+				contentRows++
+			} else if len(line.Lines) > 0 {
 				contentRows += 1 + len(line.Lines)
 			} else {
 				contentRows++
@@ -1277,24 +1401,50 @@ func composeFrame(logo [][]Pixel, info []InfoLine, userHost string, cols, rows i
 		keyW := minInt(11, maxInt(5, infoW/4))
 		valueW := infoW - keyW - 2
 		for _, line := range info {
-			if y >= rows {
-				break
+			if y >= rows { break }
+			if line.Kind == "blank" { y++; continue }
+			if line.Kind == "custom" {
+				x := contentX + line.PaddingLeft
+				put(canvas, x, y, clip(line.Value, infoW-line.PaddingLeft), line.ValueColor, infoW-line.PaddingLeft)
+				y++
+				continue
+			}
+			if line.Kind == "palette" {
+				x := contentX + line.PaddingLeft
+				symbol := "●"
+				if line.Symbol == "square" { symbol = "■" }
+				for n := 0; n < 16 && x < contentX+infoW; n++ {
+					put(canvas, x, y, symbol, fmt.Sprintf("\x1b[38;5;%dm", n), 2)
+					x += 2
+				}
+				y++
+				continue
 			}
 			if len(line.Lines) > 0 {
-				put(canvas, contentX, y, clip(line.Label+":", infoW), cCyan, infoW)
+				labelColor := line.LabelColor
+				if labelColor == "" { labelColor = cCyan }
+				put(canvas, contentX, y, clip(line.Label+":", infoW), labelColor, infoW)
 				y++
 				for _, item := range line.Lines {
-					if y >= rows {
-						break
-					}
+					if y >= rows { break }
 					put(canvas, contentX+4, y, clip(item, infoW-4), cWhite, infoW-4)
 					y++
 				}
 				continue
 			}
-			put(canvas, contentX, y, clip(line.Label, keyW), cCyan, keyW)
-			put(canvas, contentX+keyW, y, ": ", cDim, 2)
-			put(canvas, contentX+keyW+2, y, clip(line.Value, valueW), cWhite, valueW)
+			labelColor := line.LabelColor
+			if labelColor == "" { labelColor = cCyan }
+			valueColor := line.ValueColor
+			if valueColor == "" { valueColor = cWhite }
+			separator := line.Separator
+			if separator == "" { separator = cfg.Separator }
+			if separator == "" { separator = ": " }
+			label := clip(line.Label, infoW)
+			labelWidth := displayWidth(label)
+			put(canvas, contentX, y, label, labelColor, infoW)
+			put(canvas, contentX+labelWidth, y, separator, cDim, displayWidth(separator))
+			valueX := contentX + labelWidth + displayWidth(separator)
+			put(canvas, valueX, y, clip(line.Value, infoW-(valueX-contentX)), valueColor, infoW-(valueX-contentX))
 			y++
 		}
 	}
@@ -1450,7 +1600,7 @@ func main() {
 				time.Sleep(300 * time.Millisecond)
 			}
 			native := readNativeInfo()
-			info = buildInfo(mods, cfg.Fields, native)
+			info = buildConfiguredInfo(mods, cfg, native)
 			lastRefresh = now
 		}
 		cols, rows := terminalSize()
@@ -1460,7 +1610,7 @@ func main() {
 		if cols < 32 {
 			cols = 32
 		}
-		layout := computeLayout(cols, rows, cfg.ShowInfo)
+		layout := computeLayoutForConfig(cols, rows, cfg)
 		viewportW := maxInt(8, layout.Logo.W)
 		viewportH := effectiveLogoViewportHeight(maxInt(6, layout.Logo.H), cfg)
 		angleX, angleY := ax, ay
@@ -1524,7 +1674,7 @@ func loadLogo(ff string, cfg Config, configFile string) ([][]LogoCell, error) {
 		if e != nil {
 			return nil, e
 		}
-		return parseLogo(string(b)), nil
+		return parseLogo(applyLogoPalette(string(b), cfg.LogoPalette)), nil
 	}
 	cache := filepath.Join(configRoot(), "logos", slug(cfg.Logo)+".txt")
 	if b, e := os.ReadFile(cache); e == nil {
@@ -1537,7 +1687,7 @@ func loadLogo(ff string, cfg Config, configFile string) ([][]LogoCell, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not load Fastfetch logo %q: %w", cfg.Logo, err)
 	}
-	rows := parseLogo(string(out))
+	rows := parseLogo(applyLogoPalette(string(out), cfg.LogoPalette))
 	if len(rows) == 0 {
 		return nil, errors.New("Fastfetch returned an empty logo; check the logo name with fastfetch --list-logos")
 	}

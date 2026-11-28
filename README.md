@@ -169,56 +169,26 @@ The disk section lists each drive as `C (Windows): USED_GB/TOTAL_GB (PERCENT%)`.
 Window-size scaling uses the geometric mean of the terminal width and height relative to a 120×36 baseline. This allows wider terminals to contribute to scaling even when their aspect ratio is unusually wide. The adaptive multiplier never falls below 1.0x and is capped at 1.5x. If the configured or command-line base logo size is greater than 1.5x, the adaptive multiplier is disabled and the renderer uses the configured fixed logo-height limit, even when `adaptive_scale` is still set to `true`. A base size of exactly 1.5x still permits adaptive scaling. The logo can still contract to fit a terminal that is too small for its configured size. The rendered logo canvas is centered inside its allocated viewport on every frame, keeping fixed-height mode aligned as the terminal is resized; the mouse-drag hit area remains the full viewport. Disk entries are indented by four terminal columns beneath the `Disk:` heading.
 
 
-## Structured YAML configuration
+## Native YAML configuration
 
-W1F3 keeps YAML as its configuration format. In addition to the original flat
-`fields:` list, it supports an ordered `modules:` list for Fastfetch-style
-layouts. Each module can define its own display key and key color.
+W1F3 uses its own YAML settings and renderer model. The configuration below
+is a W1F3-native translation of the supplied Fastfetch profile; it does not
+use Fastfetch's `modules:`, `display:`, or `renderer:` configuration syntax.
 
-Example:
+- `logo` and `logo_file` select the logo name and optional local ASCII/ANSI file.
+- `logo_palette` maps the source file's `$1`–`$9` markers to true-colour values.
+- `logo_padding` controls the logo's top offset and the gap before the information panel.
+- `separator` controls the gap between each information label and its value.
+- `layout` is an ordered list of W1F3 display instructions:
+  - `section` draws a coloured section title or divider.
+  - `field` displays a W1F3-supported system-information field with a custom label and label colour.
+  - `blank` inserts vertical spacing.
+  - `palette` draws the terminal colour swatches.
 
-```yaml
-logo:
-  type: file
-  source: "./ascii.txt"
-  color:
-    "1": "#CDD6F4"
-  padding:
-    top: 1
-    right: 3
+The legacy `fields:` list remains supported when `layout:` is not configured.
+The `os_age` layout field is collected natively on Windows and reports the age
+of the current Windows installation; it does not execute a user-supplied shell
+command.
 
-display:
-  separator: " "
-
-renderer:
-  speed: 0.45
-  mouse: true
-
-modules:
-  - type: custom
-    format: "Hardware"
-  - type: cpu
-    key: "│ ├ CPU "
-    key_color: green
-  - type: memory
-    key: "└ └ Memory "
-    key_color: green
-  - type: break
-  - type: uptime
-    key: "› Uptime "
-    key_color: magenta
-  - type: colors
-    padding_left: 18
-    symbol: circle
-```
-
-Supported presentation modules are `break`, `custom`, and `colors`.
-Information modules use the same module names exposed by W1F3's Fastfetch
-field catalog. The Windows-native `os_age` module reports the age of the
-current Windows installation. Legacy `fields:` configurations remain
-supported.
-
-The schema at `config.schema.json` provides YAML editor completion and
-validation. Copy the structured example in `config.yaml` to
-`%USERPROFILE%\\.config\\fetch\\config.yaml`, then adjust the logo path
-for your machine.
+The schema at `config.schema.json` provides editor completion and validation
+for W1F3's own settings.

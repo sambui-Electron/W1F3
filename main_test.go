@@ -412,8 +412,10 @@ func TestConfigRejectsUnknownAndDuplicateFields(t *testing.T) {
 func TestDefaultConfigAndSchemaExposeEverySupportedField(t *testing.T) {
 	configBytes, err := os.ReadFile("config.yaml")
 	if err != nil { t.Fatal(err) }
-	if !strings.HasPrefix(string(configBytes), "# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json\n") {
-		t.Fatal("config.yaml must link to the published JSON schema on its first line")
+	firstLine := strings.SplitN(string(configBytes), "\n", 2)[0]
+	firstLine = strings.TrimSuffix(firstLine, "\r")
+	if firstLine != "# yaml-language-server: $schema=https://raw.githubusercontent.com/sambui-Electron/W1F3/main/config.schema.json" {
+		t.Fatalf("config.yaml schema directive is incorrect: %q", firstLine)
 	}
 	cfg, err := parseYAMLConfig(configBytes, defaultConfig())
 	if err != nil { t.Fatalf("ported config is invalid: %v", err) }

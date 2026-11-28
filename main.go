@@ -260,6 +260,7 @@ func parseYAMLConfig(data []byte, base Config) (Config, error) {
 		}
 	}
 	if len(doc.LogoPalette) > 0 { cfg.LogoPalette = doc.LogoPalette }
+	if doc.LogoPadding.Top < 0 || doc.LogoPadding.Right < 0 { return cfg, errors.New("logo_padding values cannot be negative") }
 	if doc.LogoPadding.Top != 0 { cfg.LogoPaddingTop = doc.LogoPadding.Top }
 	if doc.LogoPadding.Right != 0 { cfg.LogoPaddingRight = doc.LogoPadding.Right }
 	if len(doc.Modules) > 0 {
@@ -327,6 +328,7 @@ func parseYAMLConfig(data []byte, base Config) (Config, error) {
 	if cfg.Depth < 0.1 { cfg.Depth = 0.1 }
 	if cfg.Height < 0 { cfg.Height = 0 }
 	if cfg.AdaptiveStrength < 0 { cfg.AdaptiveStrength = 0 }
+	if cfg.AdaptiveStrength > 1 { cfg.AdaptiveStrength = 1 }
 	if cfg.AdaptiveMin < 1 { cfg.AdaptiveMin = 1 }
 	if cfg.AdaptiveMax < cfg.AdaptiveMin { cfg.AdaptiveMax = cfg.AdaptiveMin }
 	if cfg.AdaptiveMax > 1.5 { cfg.AdaptiveMax = 1.5 }
@@ -1593,6 +1595,7 @@ func main() {
 	}
 	if logoArg != "" {
 		cfg.Logo = logoArg
+		cfg.LogoFile = ""
 	}
 	if logoFileArg != "" {
 		cfg.LogoFile = logoFileArg

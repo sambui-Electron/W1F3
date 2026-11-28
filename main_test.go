@@ -490,49 +490,45 @@ func TestGenericFormatterHandlesAdditionalFastfetchShapes(t *testing.T) {
 	}
 }
 
-func TestStructuredYAMLModulesPreserveOrderAndStyles(t *testing.T) {
-	data := []byte(`logo:
-  type: file
-  source: "./ascii.txt"
-  color:
-    "1": "#CDD6F4"
-  padding:
-    top: 1
-    right: 3
-display:
-  separator: " "
-renderer:
-  mouse: false
-  adaptive_scale: false
+func TestNativeLayoutPreservesOrderAndStyles(t *testing.T) {
+	data := []byte(`separator: " "
+logo_palette:
+  "1": "#CDD6F4"
+logo_padding:
+  top: 1
+  right: 3
+mouse: false
+adaptive_scale: false
 color: false
-modules:
-  - type: break
-  - type: custom
-    format: "Hardware"
-  - type: cpu
-    key: "CPU"
-    key_color: green
-  - type: colors
+layout:
+  - type: blank
+  - type: section
+    text: "Hardware"
+    color: gray
+  - type: field
+    field: cpu
+    label: "CPU"
+    color: green
+  - type: palette
     padding_left: 4
     symbol: circle
 `)
 	cfg, err := parseYAMLConfig(data, defaultConfig())
 	if err != nil { t.Fatal(err) }
-	if cfg.LogoFile != "./ascii.txt" || cfg.LogoColors["1"] != "#CDD6F4" || cfg.LogoPaddingTop != 1 || cfg.LogoPaddingRight != 3 {
-		t.Fatalf("logo options not parsed: %#v", cfg)
-	}
-	if cfg.Mouse || cfg.AdaptiveScale || cfg.Color { t.Fatalf("explicit false values were ignored: %#v", cfg) }
+	if cfg.LogoPalette["1"] != "#CDD6F4" || cfg.LogoPaddingTop != 1 || cfg.LogoPaddingRight != 3 { t.Fatalf("logo settings not parsed: %#v", cfg) }
+	if cfg.Mouse || cfg.AdaptiveScale || cfg.Color { t.Fatalf("explicit false settings were ignored: %#v", cfg) }
 	if cfg.Separator != " " { t.Fatalf("separator = %q", cfg.Separator) }
-	if got := configuredFields(cfg); !equalStrings(got, []string{"cpu"}) { t.Fatalf("fetch fields = %#v", got) }
-	info := buildConfiguredInfo(map[string]any{"cpu": map[string]any{"cpu":"Test CPU"}}, cfg.Modules, NativeInfo{})
-	if len(info) != 4 || !info[0].Break || info[1].Custom != "Hardware" || info[2].Label != "CPU" || info[2].KeyColor == "" || !info[3].Colors {
-		t.Fatalf("module order/style was not preserved: %#v", info)
+	if got := layoutFields(cfg.Layout); !equalStrings(got, []string{"cpu"}) { t.Fatalf("fetch fields = %#v", got) }
+	info := buildLayoutInfo(map[string]any{"cpu": map[string]any{"cpu":"Test CPU"}}, cfg.Layout, NativeInfo{})
+	if len(info) != 4 || !info[0].Break || info[1].Custom != "Hardware" || info[1].CustomColor == "" || info[2].Label != "CPU" || info[2].KeyColor == "" || !info[3].Colors {
+		t.Fatalf("native layout order/style was not preserved: %#v", info)
 	}
 }
 
-func TestStructuredYAMLRejectsUnknownModuleTypes(t *testing.T) {
-	_, err := parseYAMLConfig([]byte("modules:\n  - type: imaginary_module\n"), defaultConfig())
-	if err == nil { t.Fatal("unknown module type should be rejected") }
+func TestNativeLayoutRejectsUnknownTypesAndFields(t *testing.T) {
+	for _, data := range []string{"layout:\n  - type: module\n","layout:\n  - type: field\n    field: not_a_field\n"} {
+		if _, err := parseYAMLConfig([]byte(data), defaultConfig()); err == nil { t.Errorf("expected invalid layout to be rejected: %s", data) }
+	}
 }
 
 func TestLogoColorSlotsBecomeTrueColorANSI(t *testing.T) {

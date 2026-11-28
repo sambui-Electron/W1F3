@@ -114,7 +114,7 @@ var supportedInfoFields = []string{
 }
 
 var nativeInfoFields = map[string]bool{
-	"disk": true, "kernel": true, "shell": true, "uptime": true, "colors": true,
+	"disk": true, "shell": true, "uptime": true, "colors": true,
 }
 
 func isSupportedInfoField(field string) bool {
@@ -128,8 +128,9 @@ func isSupportedInfoField(field string) bool {
 }
 
 // fastfetchFieldsForConfig returns only modules that should be queried from
-// Fastfetch. Disk, kernel, shell and uptime are collected by W1F3's native
-// Windows code and therefore do not belong in the Fastfetch structure request.
+// Fastfetch. Disk, shell and uptime are collected by W1F3's native Windows code;
+// kernel is queried from Fastfetch so the displayed value includes the actual
+// Windows kernel release instead of the generic NT family name.
 func fastfetchFieldsForConfig(fields []string) []string {
 	result := make([]string, 0, len(fields))
 	seen := make(map[string]bool, len(fields))
@@ -645,6 +646,18 @@ func fmtUptime(seconds uint64) string {
 	return strings.Join(parts, " ")
 }
 
+func fmtKernel(m map[string]any) string {
+	name := str(value(m, "name", "kernel"))
+	release := str(value(m, "release", "version"))
+	if release == "" {
+		return name
+	}
+	if name == "" || strings.EqualFold(name, release) {
+		return release
+	}
+	return name + " " + release
+}
+
 func fmtCPU(m map[string]any) string {
 	// Fastfetch's current CPU JSON property is `cpu`, not `name`.
 	name := str(value(m, "cpu", "name", "model", "brand"))
@@ -1136,7 +1149,7 @@ func buildInfo(mods map[string]any, fields []string, native NativeInfo) []InfoLi
 		case "os":
 			v = generic(value(asMap(mods["os"]), "prettyName", "name", "productName"))
 		case "kernel":
-			v = "Win32_NT"
+			v = fmtKernel(asMap(mods["kernel"]))
 		case "uptime":
 			v = fmtUptime(native.UptimeSeconds)
 		case "shell":
